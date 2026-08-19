@@ -125,32 +125,34 @@ export default function App() {
           {VARIABLES.map((v) => (
             <section key={v.key} className="chart-card">
               <h2>{v.label} ({v.unit})</h2>
-              <ResponsiveContainer width="100%" height="200">
-                <LineChart data={sortedHours.map((hour) => {
-                  const point: Record<string, unknown> = { hour: formatHour(hour) };
-                  for (const sid of visibleStationIds) {
-                    point[sid] = dataByStation.get(sid)?.get(hour)?.[v.key] ?? null;
-                  }
-                  return point;
-                })}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} width={45} />
-                  <Tooltip />
-                  <Legend />
-                  {visibleStationIds.map((sid, i) => (
-                    <Line
-                      key={sid}
-                      type="monotone"
-                      dataKey={sid}
-                      name={stationNames.get(sid) ?? sid}
-                      stroke={COLORS[i % COLORS.length]}
-                      dot={false}
-                      connectNulls
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="chart-wrap">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={sortedHours.map((hour) => {
+                    const point: Record<string, unknown> = { hour: formatHour(hour) };
+                    for (const sid of visibleStationIds) {
+                      point[sid] = dataByStation.get(sid)?.get(hour)?.[v.key] ?? null;
+                    }
+                    return point;
+                  })}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} width={45} />
+                    <Tooltip />
+                    <Legend />
+                    {visibleStationIds.map((sid, i) => (
+                      <Line
+                        key={sid}
+                        type="monotone"
+                        dataKey={sid}
+                        name={stationNames.get(sid) ?? sid}
+                        stroke={COLORS[i % COLORS.length]}
+                        dot={false}
+                        connectNulls
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </section>
           ))}
 
