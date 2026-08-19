@@ -1,0 +1,96 @@
+[
+  {
+    "id": "weather-com-pws",
+    "enabled": true,
+    "request": {
+      "method": "GET",
+      "url": "https://api.weather.com/v2/pws/observations/current",
+      "headers": {},
+      "params": {
+        "apiKey": "${WEATHER_COM_API_KEY}",
+        "units": "m",
+        "format": "json"
+      },
+      "timeout_ms": 10000,
+      "location_param": "stationId"
+    },
+    "locations": [
+      {
+        "id": "ijui-iiJu2",
+        "name": "Ijuí",
+        "stationId": "IIJU2",
+        "latitude": -28.391268,
+        "longitude": -53.926267
+      },
+      {
+        "id": "ijui-iiJu3",
+        "name": "Ijuí",
+        "stationId": "IIJU3",
+        "latitude": -28.353393,
+        "longitude": -53.835706
+      },
+      {
+        "id": "ijui-iiJu5",
+        "name": "Ijuí",
+        "stationId": "IIJU5",
+        "latitude": -28.404222,
+        "longitude": -53.913342
+      },
+      {
+        "id": "ijui-iiJu7",
+        "name": "Ijuí",
+        "stationId": "IIJU7",
+        "latitude": -28.310787,
+        "longitude": -53.962606
+      }
+    ],
+    "normalization": {
+      "observation_selector": "$.observations[0]",
+      "required": ["observed_at"],
+      "fields": {
+        "observed_at": {
+          "path": "$.obsTimeUtc"
+        },
+        "temperature": {
+          "path": "$.metric.temp",
+          "unit": "C"
+        },
+        "solar_radiation": {
+          "path": "$.solarRadiation",
+          "unit": "W/m2"
+        },
+        "humidity": {
+          "path": "$.humidity",
+          "unit": "%"
+        },
+        "uv_index": {
+          "path": "$.uv"
+        },
+        "wind_speed": {
+          "path": "$.metric.windSpeed",
+          "unit": "km/h"
+        },
+        "wind_direction": {
+          "path": "$.winddir",
+          "unit": "degrees"
+        },
+        "wind_gust": {
+          "path": "$.metric.windGust",
+          "unit": "km/h"
+        },
+        "pressure": {
+          "path": "$.metric.pressure",
+          "unit": "hPa"
+        },
+        "precipitation_rate": {
+          "path": "$.metric.precipRate",
+          "unit": "mm/h"
+        },
+        "precipitation_total": {
+          "path": "$.metric.precipTotal",
+          "unit": "mm"
+        }
+      }
+    }
+  }
+]
