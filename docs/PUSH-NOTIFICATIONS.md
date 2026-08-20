@@ -58,7 +58,7 @@ Keys are read from the environment at runtime — they are **never** hardcoded.
 src/push/
   api.ts            HTTP handlers for subscribe/unsubscribe/public-key
   subscriptions.ts  D1 persistence for push_subscriptions
-  send.ts           delivery via web-push + 404/410 cleanup
+  send.ts           delivery via web-push-neo + 404/410 cleanup
   rain.ts           dry->wet detection + message building
   alerts.ts         orchestrates rain detection + sending
   vapid.ts          base64url helpers for key handling

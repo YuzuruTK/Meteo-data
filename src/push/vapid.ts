@@ -2,10 +2,11 @@
  * VAPID configuration helpers.
  *
  * The heavy lifting (JWT signing, RFC 8291 payload encryption, sending) is
- * delegated to the `web-push` library, which runs under Wrangler's
- * `nodejs_compat` compatibility flag. This module only centralizes reading the
- * VAPID keys from the environment and small base64url utilities used by the
- * rest of the push module.
+ * delegated to the `web-push-neo` library, a runtime-agnostic fork of
+ * `web-push` that uses standard `fetch()` and Web Crypto so it runs natively on
+ * Cloudflare Workers. This module only centralizes reading the VAPID keys
+ * from the environment and small base64url utilities used by the rest of
+ * the push module.
  */
 
 const PUBLIC_KEY_PREFIX = "-----BEGIN PUBLIC KEY-----";
