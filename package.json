@@ -18,8 +18,12 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260818.1",
+    "@types/web-push": "^3.6.4",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.124.0"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

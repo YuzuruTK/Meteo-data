@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { fetchAggregates, fetchStations } from "./api";
+import NotificationSettings from "./NotificationSettings";
 import type { AggregateResponse, Station } from "./types";
 
 const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
@@ -273,6 +274,8 @@ export default function App() {
           </label>
         </div>
       </header>
+
+      <NotificationSettings onError={setError} />
 
       {error && <div className="error">{error}</div>}
       {!data && !error && <div className="loading">Loading…</div>}

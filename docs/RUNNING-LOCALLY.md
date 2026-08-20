@@ -18,6 +18,12 @@ Create a `.dev.vars` file (git-ignored) in the project root:
 ```text
 WEATHER_COM_API_KEY=your-api-key
 COLLECTOR_TRIGGER_SECRET=some-token
+
+# Optional: enable rain-alert push notifications
+# Generate keys with: npx web-push generate-vapid-keys
+VAPID_PUBLIC_KEY=<your-vapid-public-key>
+VAPID_PRIVATE_KEY=<your-vapid-private-key>
+VAPID_SUBJECT=mailto:you@example.com
 ```
 
 ## 3. Configure D1

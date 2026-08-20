@@ -58,6 +58,7 @@ The pipeline is fully generic — there is **no** provider-specific branching li
 - **Failure isolation** — a failed API/location does not abort the rest.
 - **Controlled concurrency** (default 3).
 - **Run tracking** (`collector_runs`) and **per-request logging** (`collector_requests`), with no secrets logged.
+- **Anonymous rain-alert push notifications** — browser Web Push when rain starts, no accounts, with stale-subscription cleanup (see [docs/PUSH-NOTIFICATIONS.md](docs/PUSH-NOTIFICATIONS.md)).
 
 ## Project layout
 
@@ -80,6 +81,13 @@ src/
     locations.ts                     weather_locations persistence
     observations.ts                  weather_observations persistence
     runs.ts                          collector_runs / collector_requests persistence
+  push/
+    api.ts                           subscribe/unsubscribe/public-key handlers
+    subscriptions.ts                 push_subscriptions persistence
+    send.ts                          web-push delivery + 404/410 cleanup
+    rain.ts                          dry->wet rain detection + messages
+    alerts.ts                        rain-alert orchestration
+    vapid.ts                         key helpers
 tests/                               vitest test suite (41 tests)
 docs/                                how-to guides
 ```
@@ -93,6 +101,7 @@ See:
 - [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) — run the Worker locally.
 - [docs/ADDING-AN-API.md](docs/ADDING-AN-API.md) — add a new weather source.
 - [docs/ADDING-A-LOCATION.md](docs/ADDING-A-LOCATION.md) — add a location to an existing source.
+- [docs/PUSH-NOTIFICATIONS.md](docs/PUSH-NOTIFICATIONS.md) — enable anonymous rain-alert push notifications.
 
 ## Dashboard
 
