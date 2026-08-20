@@ -22,6 +22,19 @@ This project supports anonymous **Web Push** notifications so visitors can subsc
 | `GET` | `/api/push/public-key` | Returns the VAPID public key used to create the subscription. |
 | `POST` | `/api/push-subscribe` | Body `{ endpoint, keys: { p256dh, auth } }` — stores a subscription (idempotent). |
 | `POST` | `/api/push-unsubscribe` | Body `{ endpoint }` — removes a subscription. |
+| `POST` | `/api/push/test` | (Secret-protected) Sends a test notification to all subscribers. Header `x-collector-trigger: <secret>`. |
+
+## Test trigger (send a fake notification)
+
+To verify push delivery end-to-end without waiting for real rain, subscribe on a device (e.g. a real Android phone with Play Services), then send a test notification to all subscribers:
+
+```bash
+curl -X POST https://YOUR_WORKER.workers.dev/api/push/test \
+  -H "x-collector-trigger: YOUR_TRIGGER_SECRET"
+```
+
+The response reports how many notifications were sent, how many expired subscriptions were removed, and any errors:
+`{ "sent": 1, "removed": 0, "errors": [] }`
 
 ## VAPID keys
 
