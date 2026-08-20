@@ -7,6 +7,11 @@ The D1 schema lives in `migrations/` and is managed via Wrangler's migration tra
 - `collector_runs`
 - `collector_requests`
 
+Migration `0002_push_subscriptions.sql` adds two tables for anonymous rain-alert push notifications:
+
+- `push_subscriptions` — stores each browser's push endpoint + keys.
+- `weather_alert_state` — tracks the last rain state per station to dedupe alerts.
+
 ## Before you begin
 
 1. Create the D1 database (once) if it doesn't already exist:
@@ -53,7 +58,7 @@ Wrangler tracks applied migrations, so do not modify `0001` after it has been ap
 
 ```bash
 npx wrangler d1 migrations create meteo-data describe_change
-# creates migrations/0002_describe_change.sql
+# creates migrations/0003_describe_change.sql
 ```
 
 ## Notes

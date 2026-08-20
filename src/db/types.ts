@@ -11,6 +11,10 @@ export interface Env {
   COLLECTOR_TRIGGER_SECRET?: string;
   // Weather.com API key (secret binding).
   WEATHER_COM_API_KEY?: string;
+  // VAPID keys for Web Push (set via Wrangler secrets / .dev.vars).
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
   // Optional extra secrets referenced by other sources.
   [key: string]: unknown;
 }

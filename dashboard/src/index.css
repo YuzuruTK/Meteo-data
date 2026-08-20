@@ -95,6 +95,21 @@ td:last-child, th:last-child { text-align: right; }
 /* --- Precipitation total --- */
 .today-value { font-size: 1.5rem; font-weight: 700; color: #1f2933; text-align: center; }
 
+/* --- Rain Alerts / Notification settings --- */
+.notification-card { margin-bottom: 20px; }
+.notification-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 0.9rem; }
+.notification-label { color: #52606d; }
+.notification-permission { font-weight: 600; color: #1f2933; }
+.notification-value { color: #1f2933; }
+.notification-actions { margin-top: 12px; }
+.notification-btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.notification-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.notification-btn.subscribe { background: #1e88e5; color: #fff; }
+.notification-btn.subscribe:hover:not(:disabled) { background: #1976d2; }
+.notification-btn.unsubscribe { background: #fdecea; color: #b00020; border: 1px solid #f5c6cb; }
+.notification-btn.unsubscribe:hover:not(:disabled) { background: #fbd5d3; }
+.notification-hint { margin-top: 10px; font-size: 0.8rem; color: #7b8794; }
+
 /* Wind panel */
 .wind-row { display: flex; flex-wrap: wrap; gap: 24px; }
 .wind-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }

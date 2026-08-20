@@ -31,9 +31,30 @@ Create a `.dev.vars` file in the project root (git-ignored):
 ```text
 WEATHER_COM_API_KEY=your-key-here
 COLLECTOR_TRIGGER_SECRET=some-token
+VAPID_PUBLIC_KEY=<your-vapid-public-key>
+VAPID_PRIVATE_KEY=<your-vapid-private-key>
+VAPID_SUBJECT=mailto:you@example.com
 ```
 
 `wrangler dev` reads `.dev.vars` automatically. Do not commit this file.
+
+## Push notification secrets (VAPID)
+
+Rain alerts use VAPID (Voluntary Application Server Identification). Generate a key pair:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Then set the secrets (see [PUSH-NOTIFICATIONS.md](PUSH-NOTIFICATIONS.md) for details):
+
+```bash
+npx wrangler secret put VAPID_PUBLIC_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY
+npx wrangler secret put VAPID_SUBJECT
+```
+
+> Note: `wrangler.jsonc` sets the `nodejs_compat` compatibility flag, which is required by the `web-push` library used for message delivery.
 
 ## Required bindings
 
@@ -41,6 +62,9 @@ COLLECTOR_TRIGGER_SECRET=some-token
 | --- | --- | --- |
 | `WEATHER_COM_API_KEY` | Weather.com PWS API key | Yes, for the default source |
 | `COLLECTOR_TRIGGER_SECRET` | Protects the manual fetch trigger | Recommended |
+| `VAPID_PUBLIC_KEY` | Web Push VAPID public key | Required for rain alerts |
+| `VAPID_PRIVATE_KEY` | Web Push VAPID private key | Required for rain alerts |
+| `VAPID_SUBJECT` | VAPID contact (mailto: or https:) | Recommended |
 
 Any other secret referenced by other sources (e.g. `${SOME_API_TOKEN}`) must also be added.
 

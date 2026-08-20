@@ -2,6 +2,7 @@
   "name": "meteo-data-collector",
   "main": "src/worker.ts",
   "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dashboard/dist",
     "binding": "ASSETS",
