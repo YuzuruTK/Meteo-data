@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import { checkAndRecordRainState, buildRainMessage, rainBucket } from "../src/push/rain";
 import { insertSubscription, removeSubscription, listSubscriptions } from "../src/push/subscriptions";
+import { validatePublicKeyFormat, toBase64Url } from "../src/push/vapid";
 
 type Row = Record<string, unknown>;
 
@@ -108,6 +109,31 @@ describe("rain state detection", () => {
     ]);
     expect(result.alerts).toHaveLength(0);
     expect(result.updated).toBe(1);
+  });
+});
+
+describe("VAPID public key validation", () => {
+  it("accepts a valid 65-byte 0x04 public key", () => {
+    // 0x04 + 32-byte X + 32-byte Y
+    const raw = new Uint8Array(65);
+    raw[0] = 0x04;
+    const key = toBase64Url(raw);
+    expect(validatePublicKeyFormat(key)).toBeNull();
+  });
+
+  it("rejects a key that is not 65 bytes", () => {
+    const raw = new Uint8Array([1, 2, 3]);
+    expect(validatePublicKeyFormat(toBase64Url(raw))).not.toBeNull();
+  });
+
+  it("rejects a 65-byte key without the 0x04 prefix", () => {
+    const raw = new Uint8Array(65);
+    raw[0] = 0x03;
+    expect(validatePublicKeyFormat(toBase64Url(raw))).not.toBeNull();
+  });
+
+  it("rejects invalid base64url", () => {
+    expect(validatePublicKeyFormat("not-a-valid-@-key!")).not.toBeNull();
   });
 });
 

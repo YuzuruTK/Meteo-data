@@ -53,3 +53,32 @@ export function normalizePublicKey(key: string): string {
 export function urlB64ToUint8Array(base64String: string): Uint8Array {
   return fromBase64Url(base64String);
 }
+
+/**
+ * Validate that a normalized VAPID public key is a well-formed P-256 public
+ * key: a base64url string that decodes to a 65-byte uncompressed point
+ * beginning with the 0x04 prefix (the format Web Push expects as
+ * `applicationServerKey`).
+ *
+ * Returns an error message if the key is malformed, or null if it's valid.
+ */
+export function validatePublicKeyFormat(normalizedKey: string): string | null {
+  let bytes: Uint8Array;
+  try {
+    bytes = fromBase64Url(normalizedKey);
+  } catch {
+    return "VAPID_PUBLIC_KEY is not valid base64url";
+  }
+  if (bytes.length !== 65 || bytes[0] !== 0x04) {
+    return "VAPID_PUBLIC_KEY must decode to a 65-byte uncompressed P-256 key (0x04 prefix)";
+  }
+  return null;
+}
+
+/** Return a helper that throws if the VAPID public key is misconfigured. */
+export function assertValidPublicKey(normalizedKey: string): void {
+  const err = validatePublicKeyFormat(normalizedKey);
+  if (err) {
+    throw new Error(err);
+  }
+}

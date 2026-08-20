@@ -61,3 +61,15 @@ migrations/0002_push_subscriptions.sql
 - **Localhost**: push requires a secure context. Use `https://localhost` or Wrangler's dev preview URL. Push *delivery* to a real push service needs the deployed origin, but the subscribe flow and UI can be tested locally.
 - **Android Chrome**: Open the deployed URL, allow notifications, tap **Subscribe**, then add the site to the home screen (PWA). Rain-start notifications will appear even when the site is closed.
 - Notifications appear with the **🌦️ / 🌧️ / ⛈️** intensity prefix based on precipitation rate.
+
+## Android troubleshooting ("Registration failed - push service error")
+
+This error is thrown by the browser's `pushManager.subscribe()` and usually means the device cannot reach the push provider (FCM), **not** a problem with the VAPID key or this codebase (if subscription works on desktop, the key and backend are confirmed fine).
+
+Common causes on Android:
+
+1. **No Google Play Services / no signed-in Google account.** Android Chrome delivers push via FCM, which requires Google Play Services and a signed-in Google account. Android **emulators** (the log's User-Agent shows model `"K"`, the emulator identifier) frequently lack this and fail with this exact error. Test on a real device with Play Services.
+2. **Browser or site not set up.** Make sure you're using **Chrome** (not a WebView or a custom browser), the site is served over **HTTPS** (it is), and notifications are allowed for the site.
+3. **Network / region restrictions.** Some networks or regions can't reach FCM. Try on mobile data and in a different location.
+
+To verify the deployment is healthy: run `curl https://<HOST>/api/push/public-key` and confirm it returns a valid 65-byte, `0x04`-prefixed key (the server validates this automatically — a misconfigured key returns a `500` with a clear message instead of a confusing browser error).
