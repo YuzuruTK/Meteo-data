@@ -14,24 +14,36 @@ import type { AggregateResponse, Station } from "./types";
 
 const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
 
-const VARIABLES: { key: keyof AggregateResponse["rows"][number] & string; label: string; unit: string }[] = [
+interface VarDef {
+  key: string;
+  label: string;
+  unit: string;
+}
+
+const CHART_VARIABLES: VarDef[] = [
   { key: "temperature_avg", label: "Temperature", unit: "°C" },
   { key: "humidity_avg", label: "Humidity", unit: "%" },
-  { key: "pressure_avg", label: "Pressure", unit: "hPa" },
-  { key: "wind_speed_avg", label: "Wind speed", unit: "km/h" },
-  { key: "wind_gust_avg", label: "Wind gust", unit: "km/h" },
-  { key: "wind_direction_avg", label: "Wind direction", unit: "°" },
   { key: "solar_radiation_avg", label: "Solar radiation", unit: "W/m²" },
   { key: "uv_index_avg", label: "UV index", unit: "" },
   { key: "precipitation_rate_avg", label: "Precip. rate", unit: "mm/h" },
   { key: "precipitation_total_avg", label: "Precip. total", unit: "mm" },
-  { key: "cloud_cover_avg", label: "Cloud cover", unit: "%" },
-  { key: "visibility_avg", label: "Visibility", unit: "km" },
+];
+
+// Declarative list for the summary table section.
+const SUMMARY_VARIABLES: VarDef[] = [
+  ...CHART_VARIABLES,
+  { key: "pressure_avg", label: "Pressure", unit: "hPa" },
+  { key: "wind_speed_avg", label: "Wind speed", unit: "km/h" },
+  { key: "wind_gust_avg", label: "Wind gust", unit: "km/h" },
+  { key: "wind_direction_avg", label: "Wind direction", unit: "°" },
+];
+
+const OPTIONAL_CHART_VARIABLES: VarDef[] = [
+  { key: "pressure_avg", label: "Pressure", unit: "hPa" },
 ];
 
 const COLORS = [
   "#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#00C49F", "#FF8042",
-  "#a4de6c", "#d0ed57", "#808888", "#6b6b6b", "#413ea0", "#ff6b6b",
 ];
 
 function formatHour(hour: string): string {
@@ -40,10 +52,94 @@ function formatHour(hour: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Direction label from a compass bearing in degrees. */
+function bearingToLabel(deg: number | null): string {
+  if (deg === null) return "–";
+  const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16] ?? "–";
+}
+
+/* ---------- Category + visualization helpers ---------- */
+
+interface Category { label: string; color: string; }
+
+function humidityCategory(v: number): Category {
+  if (v < 30) return { label: "Dry", color: "#e0b94f" };
+  if (v < 60) return { label: "Comfortable", color: "#82ca9d" };
+  if (v < 80) return { label: "Humid", color: "#42a5f5" };
+  return { label: "Very Humid", color: "#7e57c2" };
+}
+
+const UV_TIERS: { max: number; label: string; color: string }[] = [
+  { max: 2, label: "Low", color: "#4caf50" },
+  { max: 5, label: "Moderate", color: "#ffb300" },
+  { max: 7, label: "High", color: "#fb8c00" },
+  { max: 10, label: "Very High", color: "#e53935" },
+  { max: Infinity, label: "Extreme", color: "#7e57c2" },
+];
+
+function uvInfo(v: number): { label: string; color: string; index: number } {
+  let idx = 0;
+  for (let i = 0; i < UV_TIERS.length; i++) {
+    if (v <= UV_TIERS[i]!.max) { idx = i; break; }
+  }
+  const t = UV_TIERS[idx] ?? UV_TIERS[UV_TIERS.length - 1]!;
+  return { label: t.label, color: t.color, index: idx };
+}
+
+function solarCategory(v: number): Category {
+  if (v <= 100) return { label: "Very Low", color: "#90a4ae" };
+  if (v <= 300) return { label: "Low", color: "#42a5f5" };
+  if (v <= 600) return { label: "Moderate", color: "#ffb300" };
+  if (v <= 900) return { label: "High", color: "#fb8c00" };
+  return { label: "Very High", color: "#e53935" };
+}
+
+function precipCategory(v: number): Category {
+  if (v <= 0) return { label: "Dry", color: "#82ca9d" };
+  if (v < 2.5) return { label: "Drizzle", color: "#42a5f5" };
+  if (v < 10) return { label: "Rain", color: "#1e88e5" };
+  if (v < 50) return { label: "Heavy Rain", color: "#3949ab" };
+  return { label: "Storm", color: "#7e57c2" };
+}
+
+function windSpeedCategory(v: number): Category {
+  if (v <= 5) return { label: "Calm", color: "#82ca9d" };
+  if (v <= 20) return { label: "Light", color: "#42a5f5" };
+  if (v <= 40) return { label: "Moderate", color: "#ffb300" };
+  if (v <= 60) return { label: "Strong", color: "#fb8c00" };
+  return { label: "Very Strong", color: "#e53935" };
+}
+
+/** Simple thermometer/gauge color: blue(cold) -> green -> yellow -> red(hot). */
+function tempColor(v: number): string {
+  if (v <= 0) return "#2196f3";
+  if (v < 15) return "#4caf50";
+  if (v < 25) return "#ffb300";
+  return "#e53935";
+}
+
+function SVGArc({ pct, color }: { pct: number; color: string }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const filled = Math.max(0, Math.min(100, pct));
+  return (
+    <svg viewBox="0 0 96 96" className="ring">
+      <circle cx="48" cy="48" r={r} fill="none" stroke="#e4e7eb" strokeWidth="10" />
+      <circle
+        cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="10"
+        strokeLinecap="round" strokeDasharray={`${(filled / 100) * c} ${c}`}
+        transform="rotate(-90 48 48)"
+      />
+    </svg>
+  );
+}
+
 export default function App() {
   const [stations, setStations] = useState<Station[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [hours, setHours] = useState<number>(24);
+  const [showPressure, setShowPressure] = useState<boolean>(false);
   const [data, setData] = useState<AggregateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +188,63 @@ export default function App() {
     return Array.from(ids);
   }, [data, selected]);
 
+  /** Latest hour's averaged values across stations at that hour. */
+  const latest = useMemo(() => {
+    const rows = data?.rows ?? [];
+    if (rows.length === 0) return null;
+    const latestHour = rows.reduce((max, r) => (r.hour > max ? r.hour : max), rows[0]!.hour);
+    const atHour = rows.filter((r) => r.hour === latestHour);
+    if (atHour.length === 0) return null;
+
+    const keys = [
+      "temperature_avg", "humidity_avg", "solar_radiation_avg", "uv_index_avg",
+      "precipitation_rate_avg", "precipitation_total_avg", "pressure_avg",
+      "wind_speed_avg", "wind_gust_avg", "wind_direction_avg",
+    ];
+    const values: Record<string, number | null> = {};
+    for (const key of keys) {
+      const nums = atHour
+        .map((r) => r[key as keyof AggregateResponse["rows"][number]] as number | null)
+        .filter((v): v is number => typeof v === "number");
+      values[key] = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+    }
+    return { hour: latestHour, stationCount: atHour.length, values };
+  }, [data]);
+
+  /** Min/max for the thermometer across the whole visible range (all stations). */
+  const tempRange = useMemo(() => {
+    const rows = data?.rows ?? [];
+    const temps = rows
+      .map((r) => r.temperature_avg)
+      .filter((v): v is number => typeof v === "number");
+    if (temps.length === 0) return null;
+    return { min: Math.min(...temps), max: Math.max(...temps) };
+  }, [data]);
+
+  /** Pressure trend: compare latest vs the mean of earlier readings in range. */
+  const pressureTrend = useMemo(() => {
+    const rows = data?.rows ?? [];
+    if (rows.length < 2) return "stable";
+    const latestVal = latest?.values.pressure_avg ?? null;
+    const others = rows
+      .flatMap((r) => (r.hour !== latest?.hour ? [r.pressure_avg] : []))
+      .filter((v): v is number => typeof v === "number");
+    if (latestVal === null || others.length === 0) return "stable";
+    const avgOther = others.reduce((a, b) => a + b, 0) / others.length;
+    const diff = latestVal - avgOther;
+    if (diff > 0.5) return "rising";
+    if (diff < -0.5) return "falling";
+    return "stable";
+  }, [data, latest]);
+
+  const chartVariables = useMemo(() => {
+    const list = [...CHART_VARIABLES];
+    if (showPressure) list.push(...OPTIONAL_CHART_VARIABLES);
+    return list;
+  }, [showPressure]);
+
+  const current = latest?.values ?? null;
+
   return (
     <div className="app">
       <header className="header">
@@ -114,6 +267,10 @@ export default function App() {
               ))}
             </select>
           </label>
+          <label className="toggle">
+            <input type="checkbox" checked={showPressure} onChange={(e) => setShowPressure(e.target.checked)} />
+            Show pressure
+          </label>
         </div>
       </header>
 
@@ -122,7 +279,201 @@ export default function App() {
 
       {data && (
         <main>
-          {VARIABLES.map((v) => (
+          <section className="summary" aria-label="Latest readings">
+            <div className="summary-grid">
+              {/* Temperature — thermometer */}
+              <div className="summary-card gauge-card">
+                <span className="summary-label">🌡 Temperature</span>
+                {current?.temperature_avg != null && tempRange ? (
+                  <div className="thermometer">
+                    <div className="therm-rail">
+                      <div
+                        className="therm-fill"
+                        style={{ height: `${((current.temperature_avg - tempRange.min) / (tempRange.max - tempRange.min || 1)) * 100}%` }}
+                      />
+                      <div className="therm-bulb" style={{ background: tempColor(current.temperature_avg) }} />
+                    </div>
+                    <div className="therm-labels">
+                      <span>{tempRange.max.toFixed(0)}°</span>
+                      <span className="therm-current" style={{ color: tempColor(current.temperature_avg) }}>
+                        {current.temperature_avg.toFixed(1)}°
+                      </span>
+                      <span>{tempRange.min.toFixed(0)}°</span>
+                    </div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Humidity — ring gauge */}
+              <div className="summary-card gauge-card">
+                <span className="summary-label">💧 Humidity</span>
+                {current?.humidity_avg != null ? (
+                  <div className="ring-wrap">
+                    <SVGArc pct={current.humidity_avg} color={humidityCategory(current.humidity_avg).color} />
+                    <div className="ring-value">{current.humidity_avg.toFixed(0)}%</div>
+                    <div className="ring-label" style={{ color: humidityCategory(current.humidity_avg).color }}>
+                      {humidityCategory(current.humidity_avg).label}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* UV Index — colored scale */}
+              <div className="summary-card gauge-card">
+                <span className="summary-label">☀ UV Index</span>
+                {current?.uv_index_avg != null ? (
+                  <div className="uv-wrap">
+                    <div className="uv-scale">
+                      <div className="uv-track">
+                        {UV_TIERS.map((t) => (
+                          <span key={t.label} className="uv-seg" style={{ background: t.color }} />
+                        ))}
+                        <span className="uv-marker" style={{ left: `${Math.min(100, (current.uv_index_avg! / 11) * 100)}%` }} />
+                      </div>
+                      <div className="uv-labels">
+                        {["0", "2", "5", "7", "10", "11+"].map((t) => <span key={t}>{t}</span>)}
+                      </div>
+                    </div>
+                    <div className="uv-value" style={{ color: uvInfo(current.uv_index_avg!).color }}>
+                      {current.uv_index_avg.toFixed(1)} · {uvInfo(current.uv_index_avg!).label}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Solar radiation — progress bar */}
+              <div className="summary-card gauge-card">
+                <span className="summary-label">☀ Solar radiation</span>
+                {current?.solar_radiation_avg != null ? (
+                  <div className="solar-wrap">
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: `${Math.min(100, (current.solar_radiation_avg / 900) * 100)}%`, background: solarCategory(current.solar_radiation_avg).color }}
+                      />
+                    </div>
+                    <div className="bar-value">{current.solar_radiation_avg.toFixed(0)} W/m²</div>
+                    <div className="bar-label" style={{ color: solarCategory(current.solar_radiation_avg).color }}>
+                      {solarCategory(current.solar_radiation_avg).label}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Precipitation rate — status card */}
+              <div className="summary-card gauge-card">
+                <span className="summary-label">🌧 Rain</span>
+                {current?.precipitation_rate_avg != null ? (
+                  <div className="precip-wrap">
+                    <div className="precip-status" style={{ color: precipCategory(current.precipitation_rate_avg).color }}>
+                      {precipCategory(current.precipitation_rate_avg).label}
+                    </div>
+                    <div className="precip-value">{current.precipitation_rate_avg.toFixed(1)} mm/h</div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Wind — speed + direction */}
+              <div className="summary-card">
+                <span className="summary-label">💨 Wind</span>
+                {current?.wind_speed_avg != null ? (
+                  <div className="wind-wrap">
+                    <div className="wind-main">
+                      <span className="wind-value">{current.wind_speed_avg.toFixed(1)}</span>
+                      <span className="wind-unit">km/h</span>
+                      {current.wind_direction_avg != null && (
+                        <span className="wind-dir" title={`${current.wind_direction_avg.toFixed(0)}°`}>
+                          {bearingGlyph(current.wind_direction_avg)} {bearingToLabel(current.wind_direction_avg)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="wind-cat" style={{ color: windSpeedCategory(current.wind_speed_avg).color }}>
+                      {windSpeedCategory(current.wind_speed_avg).label}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Pressure — value + trend */}
+              <div className="summary-card">
+                <span className="summary-label">🌡 Pressure</span>
+                {current?.pressure_avg != null ? (
+                  <div className="pressure-wrap">
+                    <span className="pressure-value">{current.pressure_avg.toFixed(1)} hPa</span>
+                    <span className="pressure-trend">{pressureTrendArrow(pressureTrend)}</span>
+                    <span className="pressure-label">{pressureTrendLabel(pressureTrend)}</span>
+                  </div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+
+              {/* Precipitation total — large number */}
+              <div className="summary-card">
+                <span className="summary-label">🌧 Today</span>
+                {current?.precipitation_total_avg != null ? (
+                  <div className="today-value">{current.precipitation_total_avg.toFixed(1)} mm</div>
+                ) : (
+                  <span className="summary-value">–</span>
+                )}
+              </div>
+            </div>
+            {latest && (
+              <div className="summary-caption">
+                Average of latest readings · {formatHour(latest.hour)} · {latest.stationCount} {latest.stationCount === 1 ? "station" : "stations"}
+              </div>
+            )}
+          </section>
+
+          {/* Wind panel */}
+          <section className="chart-card">
+            <h2>Wind</h2>
+            <div className="wind-row">
+              {visibleStationIds.map((sid) => {
+                const latestRow = dataByStation.get(sid)?.get(sortedHours[sortedHours.length - 1] ?? "");
+                const dir = latestRow?.wind_direction_avg ?? null;
+                const speed = latestRow?.wind_speed_avg ?? null;
+                const gust = latestRow?.wind_gust_avg ?? null;
+                return (
+                  <div key={sid} className="wind-item">
+                    <div className="station-label">{stationNames.get(sid) ?? sid}</div>
+                    <div className="compass">
+                      <span className="compass-n">N</span>
+                      <span className="compass-e">E</span>
+                      <span className="compass-s">S</span>
+                      <span className="compass-w">W</span>
+                      <span
+                        className="compass-arrow"
+                        style={{ transform: `translate(-50%, -50%) rotate(${dir !== null ? (dir % 360) + 180 : 0}deg)` }}
+                        title={`${dir !== null ? dir.toFixed(0) + "°" : "no data"}`}
+                      >↑</span>
+                    </div>
+                    <div className="wind-speed">
+                      {speed !== null ? `${Number(speed).toFixed(1)} km/h` : "–"}
+                      {gust !== null ? ` · gust ${Number(gust).toFixed(1)} km/h` : ""}
+                      <span className="wind-direction">
+                        {dir !== null ? `${dir.toFixed(0)}° ${bearingToLabel(dir)}` : ""}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {chartVariables.map((v) => (
             <section key={v.key} className="chart-card">
               <h2>{v.label} ({v.unit})</h2>
               <div className="chart-wrap">
@@ -130,7 +481,7 @@ export default function App() {
                   <LineChart data={sortedHours.map((hour) => {
                     const point: Record<string, unknown> = { hour: formatHour(hour) };
                     for (const sid of visibleStationIds) {
-                      point[sid] = dataByStation.get(sid)?.get(hour)?.[v.key] ?? null;
+                      point[sid] = dataByStation.get(sid)?.get(hour)?.[v.key as keyof AggregateResponse["rows"][number]] ?? null;
                     }
                     return point;
                   })}>
@@ -164,7 +515,7 @@ export default function App() {
                   <tr>
                     <th>Station</th>
                     <th>Hour</th>
-                    {VARIABLES.map((v) => <th key={v.key}>{v.label}</th>)}
+                    {SUMMARY_VARIABLES.map((v) => <th key={v.key}>{v.label}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -172,8 +523,8 @@ export default function App() {
                     <tr key={i}>
                       <td>{stationNames.get(row.station_id) ?? row.station_id}</td>
                       <td>{formatHour(row.hour)}</td>
-                      {VARIABLES.map((v) => (
-                        <td key={v.key}>{row[v.key] !== null ? Number(row[v.key]).toFixed(1) : "–"}</td>
+                      {SUMMARY_VARIABLES.map((v) => (
+                        <td key={v.key}>{row[v.key as keyof AggregateResponse["rows"][number]] !== null ? Number(row[v.key as keyof AggregateResponse["rows"][number]]).toFixed(1) : "–"}</td>
                       ))}
                     </tr>
                   ))}
@@ -185,4 +536,25 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/** Arrow glyph for a wind bearing (pointing where wind comes from). */
+function bearingGlyph(deg: number): string {
+  const d = ((deg % 360) + 360) % 360;
+  if (d >= 337.5 || d < 22.5) return "↓"; // from N -> pointing down
+  if (d < 67.5) return "↙";
+  if (d < 112.5) return "←";
+  if (d < 157.5) return "↖";
+  if (d < 202.5) return "↑";
+  if (d < 247.5) return "↗";
+  if (d < 292.5) return "→";
+  return "↘";
+}
+
+function pressureTrendArrow(trend: string): string {
+  return trend === "rising" ? "↗" : trend === "falling" ? "↘" : "→";
+}
+
+function pressureTrendLabel(trend: string): string {
+  return trend === "rising" ? "Rising" : trend === "falling" ? "Falling" : "Stable";
 }

@@ -30,3 +30,81 @@ th, td { border: 1px solid #e4e7eb; padding: 6px 8px; text-align: right; }
 th { background: #f0f4f8; position: sticky; top: 0; }
 td:first-child, th:first-child { text-align: left; }
 td:last-child, th:last-child { text-align: right; }
+
+/* Toggle control in the header */
+.toggle { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 0.85rem; color: #52606d; }
+.toggle input { margin: 0; }
+
+/* Latest-readings summary */
+.summary { margin-bottom: 20px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.summary-card { background: #fff; border: 1px solid #e4e7eb; border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(16, 42, 67, 0.05); }
+.summary-card.gauge-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.summary-label { display: block; font-size: 0.78rem; color: #52606d; margin-bottom: 8px; text-align: center; }
+.summary-value { display: block; font-size: 1.05rem; font-weight: 600; color: #1f2933; }
+.summary-caption { margin-top: 10px; font-size: 0.8rem; color: #7b8794; }
+
+/* --- Temperature thermometer --- */
+.thermometer { display: flex; gap: 10px; align-items: stretch; justify-content: center; min-height: 150px; }
+.therm-rail { position: relative; width: 18px; height: 150px; border-radius: 9px; background: #e4e7eb; overflow: hidden; }
+.therm-fill { position: absolute; left: 0; right: 0; bottom: 0; background: #e53935; }
+.therm-bulb { position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%); width: 26px; height: 26px; border-radius: 50%; border: 2px solid #e4e7eb; }
+.therm-labels { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; font-size: 0.72rem; color: #7b8794; }
+.therm-current { font-size: 1.05rem; font-weight: 700; }
+
+/* --- Humidity ring --- */
+.ring-wrap { position: relative; width: 96px; height: 96px; }
+.ring { width: 96px; height: 96px; }
+.ring-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.1rem; font-weight: 700; color: #1f2933; }
+.ring-label { margin-top: 4px; font-size: 0.78rem; font-weight: 600; }
+
+/* --- UV scale --- */
+.uv-wrap { width: 100%; }
+.uv-track { position: relative; display: flex; height: 14px; border-radius: 7px; overflow: hidden; }
+.uv-seg { flex: 1; }
+.uv-marker { position: absolute; top: -3px; width: 3px; height: 20px; background: #1f2933; border-radius: 2px; transform: translateX(-50%); }
+.uv-labels { display: flex; justify-content: space-between; font-size: 0.62rem; color: #7b8794; margin-top: 3px; }
+.uv-value { margin-top: 8px; font-size: 1rem; font-weight: 700; }
+
+/* --- Solar bar --- */
+.solar-wrap { width: 100%; }
+.bar-track { height: 12px; border-radius: 6px; background: #e4e7eb; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 6px; }
+.bar-value { margin-top: 6px; font-size: 0.95rem; font-weight: 600; color: #1f2933; }
+.bar-label { font-size: 0.78rem; font-weight: 600; }
+
+/* --- Rain status --- */
+.precip-wrap { text-align: center; }
+.precip-status { font-size: 1.1rem; font-weight: 700; }
+.precip-value { margin-top: 4px; font-size: 0.85rem; color: #52606d; }
+
+/* --- Wind summary --- */
+.wind-wrap { text-align: center; }
+.wind-main { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
+.wind-value { font-size: 1.3rem; font-weight: 700; color: #1f2933; }
+.wind-unit { font-size: 0.78rem; color: #52606d; }
+.wind-dir { font-size: 0.85rem; color: #3e4c59; }
+.wind-cat { margin-top: 4px; font-size: 0.78rem; font-weight: 600; }
+
+/* --- Pressure --- */
+.pressure-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pressure-value { font-size: 1.1rem; font-weight: 700; color: #1f2933; }
+.pressure-trend { font-size: 1.3rem; line-height: 1; }
+.pressure-label { font-size: 0.78rem; color: #52606d; }
+
+/* --- Precipitation total --- */
+.today-value { font-size: 1.5rem; font-weight: 700; color: #1f2933; text-align: center; }
+
+/* Wind panel */
+.wind-row { display: flex; flex-wrap: wrap; gap: 24px; }
+.wind-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.station-label { font-size: 0.85rem; color: #3e4c59; font-weight: 600; }
+.compass { position: relative; width: 96px; height: 96px; border: 1px solid #cbd2d9; border-radius: 50%; background: #f0f4f8; }
+.compass-n, .compass-e, .compass-s, .compass-w { position: absolute; font-size: 0.72rem; font-weight: 700; color: #52606d; }
+.compass-n { top: 3px; left: 50%; transform: translateX(-50%); }
+.compass-e { right: 5px; top: 50%; transform: translateY(-50%); }
+.compass-s { bottom: 3px; left: 50%; transform: translateX(-50%); }
+.compass-w { left: 5px; top: 50%; transform: translateY(-50%); }
+.compass-arrow { position: absolute; top: 50%; left: 50%; font-size: 1.4rem; line-height: 1; color: #b00020; }
+.wind-speed { font-size: 0.85rem; color: #3e4c59; }
+.wind-direction { display: block; text-align: center; font-size: 0.78rem; color: #7b8794; }
