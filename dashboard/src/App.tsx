@@ -10,8 +10,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { fetchAggregates, fetchStations } from "./api";
+import { fetchForecast } from "./forecast";
 import NotificationSettings from "./NotificationSettings";
-import type { AggregateResponse, Station } from "./types";
+import type { AggregateResponse, ForecastResponse, Station } from "./types";
 
 const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
 
@@ -51,6 +52,37 @@ function formatHour(hour: string): string {
   const d = new Date(hour + ":00Z");
   if (Number.isNaN(d.getTime())) return hour;
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Normalize an Open-Meteo ISO hour ("2026-08-21T13:00") to UTC "YYYY-MM-DD HH:00". */
+function forecastHourKey(time: string): string {
+  const prefix = time.slice(0, 13); // "YYYY-MM-DDTHH"
+  return `${prefix.slice(0, 10)} ${prefix.slice(11, 13)}:00`;
+}
+
+/**
+ * Map a chart variable key to its forecast line label and color.
+ * Returns null for variables that have no forecast counterpart.
+ */
+function forecastLineFor(variableKey: string): { label: string; color: string } | null {
+  switch (variableKey) {
+    case "temperature_avg":
+      return { label: "Temperature Forecast", color: COLORS[3] }; // #ff7300
+    case "humidity_avg":
+      return { label: "Humidity Forecast", color: COLORS[1] }; // #82ca9d
+    case "cloud_cover_avg":
+      return { label: "Cloud Cover Forecast", color: COLORS[4] }; // #00C49F
+    case "pressure_avg":
+      return { label: "Pressure Forecast", color: COLORS[5] }; // #FF8042
+    case "wind_speed_avg":
+      return { label: "Wind Speed Forecast", color: COLORS[2] }; // #ffc658
+    case "precipitation_rate_avg":
+      return { label: "Precip. Rate Forecast", color: COLORS[0] }; // #8884d8
+    case "precipitation_total_avg":
+      return { label: "Precipitation Forecast", color: COLORS[0] }; // #8884d8
+    default:
+      return null;
+  }
 }
 
 /** Direction label from a compass bearing in degrees. */
@@ -142,6 +174,7 @@ export default function App() {
   const [hours, setHours] = useState<number>(24);
   const [showPressure, setShowPressure] = useState<boolean>(false);
   const [data, setData] = useState<AggregateResponse | null>(null);
+  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -156,6 +189,11 @@ export default function App() {
       .then(setData)
       .catch((e) => setError(String(e)));
   }, [hours, selected]);
+
+  // Forecast is optional and non-fatal; never surfaces an error state.
+  useEffect(() => {
+    fetchForecast().then(setForecast);
+  }, []);
 
   const stationNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -180,6 +218,59 @@ export default function App() {
     const hoursSet = new Set((data?.rows ?? []).map((r) => r.hour));
     return Array.from(hoursSet).sort();
   }, [data]);
+
+  const forecastByHour = useMemo(() => {
+    const map = new Map<string, ForecastResponse["hourly"][number]>();
+    for (const h of forecast?.hourly ?? []) {
+      map.set(forecastHourKey(h.time), h);
+    }
+    return map;
+  }, [forecast]);
+
+  const futureForecastHours = useMemo(() => {
+    const latestObserved = sortedHours[sortedHours.length - 1];
+    const hours = Array.from(forecastByHour.keys()).filter(
+      (h) => (latestObserved ? h > latestObserved : true),
+    );
+    hours.sort();
+    return hours;
+  }, [forecastByHour, sortedHours]);
+
+  /** Observed hours followed by future forecast hours, in chronological order. */
+  const chartHours = useMemo(() => {
+    return [...sortedHours, ...futureForecastHours];
+  }, [sortedHours, futureForecastHours]);
+
+  const forecastValueFor = (hour: string, variableKey: string): number | null => {
+    const entry = forecastByHour.get(hour);
+    if (!entry) return null;
+    let value: number | null | undefined = null;
+    if (variableKey === "temperature_avg") value = entry.temperature;
+    else if (variableKey === "humidity_avg") value = entry.humidity;
+    else if (variableKey === "cloud_cover_avg") value = entry.cloudCover;
+    else if (variableKey === "pressure_avg") value = entry.surfacePressure ?? null;
+    else if (variableKey === "wind_speed_avg") value = entry.windSpeed ?? null;
+    else if (variableKey === "precipitation_rate_avg") value = entry.precipitation;
+    else if (variableKey === "precipitation_total_avg") value = entry.precipitation;
+    if (typeof value !== "number") return null;
+    return Math.round(value * 100) / 100;
+  };
+
+  const forecastSummary = useMemo(() => {
+    const hourly = forecast?.hourly ?? [];
+    if (hourly.length === 0) return null;
+    const current = hourly[0]!;
+    const next6 = hourly.slice(0, 6);
+    const next24 = hourly.slice(0, 24);
+    const rainProb = Math.max(0, ...next6.map((h) => h.precipitationProbability));
+    const temps = next24.map((h) => h.temperature);
+    return {
+      currentTemp: current.temperature,
+      rainProb,
+      maxTemp: Math.max(...temps),
+      minTemp: Math.min(...temps),
+    };
+  }, [forecast]);
 
   const visibleStationIds = useMemo(() => {
     const ids = new Set((data?.rows ?? []).map((r) => r.station_id));
@@ -308,6 +399,19 @@ export default function App() {
                   <span className="summary-value">–</span>
                 )}
               </div>
+
+              {/* Forecast summary (Open-Meteo) — optional, additive only */}
+              {forecast && forecast.hourly.length > 0 && forecastSummary && (
+                <div className="summary-card forecast-card">
+                  <span className="summary-label">📡 Forecast</span>
+                  <div className="forecast-temp">{forecastSummary.currentTemp.toFixed(1)}°C</div>
+                  <div className="forecast-detail">Rain next 6h: {forecastSummary.rainProb.toFixed(0)}%</div>
+                  <div className="forecast-detail">
+                    Today: {forecastSummary.minTemp.toFixed(0)}° / {forecastSummary.maxTemp.toFixed(0)}°
+                  </div>
+                  <div className="forecast-attribution">Forecast provided by Open-Meteo</div>
+                </div>
+              )}
 
               {/* Humidity — ring gauge */}
               <div className="summary-card gauge-card">
@@ -481,11 +585,13 @@ export default function App() {
               <h2>{v.label} ({v.unit})</h2>
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={sortedHours.map((hour) => {
+                  <LineChart data={chartHours.map((hour) => {
                     const point: Record<string, unknown> = { hour: formatHour(hour) };
                     for (const sid of visibleStationIds) {
-                      point[sid] = dataByStation.get(sid)?.get(hour)?.[v.key as keyof AggregateResponse["rows"][number]] ?? null;
+                      const raw = dataByStation.get(sid)?.get(hour)?.[v.key as keyof AggregateResponse["rows"][number]] ?? null;
+                      point[sid] = typeof raw === "number" ? Math.round(raw * 100) / 100 : raw;
                     }
+                    point.forecast = forecastValueFor(hour, v.key);
                     return point;
                   })}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -504,6 +610,18 @@ export default function App() {
                         connectNulls
                       />
                     ))}
+                    {forecast && forecastLineFor(v.key) && (
+                      <Line
+                        key="forecast"
+                        type="monotone"
+                        dataKey="forecast"
+                        name={forecastLineFor(v.key)!.label}
+                        stroke={forecastLineFor(v.key)!.color}
+                        strokeDasharray="5 5"
+                        dot={false}
+                        connectNulls={false}
+                      />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>

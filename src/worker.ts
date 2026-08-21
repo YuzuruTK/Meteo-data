@@ -1,6 +1,7 @@
 import { loadEnabledSources } from "./config/config";
 import { runCollection } from "./collector/collector";
 import { handleApi } from "./dashboard/api";
+import { handleForecastApi } from "./forecast/api";
 import { handlePushApi } from "./push/api";
 import { runRainAlerts, buildPushSendOptions } from "./push/alerts";
 import { sendPushNotifications } from "./push/send";
@@ -38,6 +39,15 @@ export default {
 
   fetch: async (request: Request, env: Env): Promise<Response> => {
     const url = new URL(request.url);
+
+    // Forecast API (Open-Meteo). Independent of observations; handles its own
+    // caching and graceful degradation.
+    if (url.pathname === "/api/forecast") {
+      const forecastResponse = await handleForecastApi(request);
+      if (forecastResponse) {
+        return forecastResponse;
+      }
+    }
 
     // Public dashboard API.
     if (url.pathname.startsWith("/api/") && request.method === "GET") {

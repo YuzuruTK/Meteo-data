@@ -27,3 +27,24 @@ export interface AggregateResponse {
   rows: AggregateRow[];
   filters: { hours: number; station: string | null };
 }
+
+/** A single hourly forecast data point returned by /api/forecast. */
+export interface ForecastHourly {
+  time: string;
+  temperature: number;
+  humidity: number;
+  precipitationProbability: number;
+  precipitation: number;
+  cloudCover: number;
+  /** Optional extra variables for future verification / alerts / ML. */
+  dewPoint?: number;
+  surfacePressure?: number;
+  windSpeed?: number;
+  windDirection?: number;
+}
+
+/** Top-level response from /api/forecast. */
+export interface ForecastResponse {
+  generatedAt: string;
+  hourly: ForecastHourly[];
+}
