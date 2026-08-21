@@ -54,7 +54,7 @@ npx wrangler secret put VAPID_PRIVATE_KEY
 npx wrangler secret put VAPID_SUBJECT
 ```
 
-> Note: `wrangler.jsonc` sets the `nodejs_compat` compatibility flag, which is required by the `web-push` library used for message delivery.
+> Note: message delivery uses the `web-push-neo` library, which relies on standard `fetch()` and Web Crypto and runs natively on Cloudflare Workers (no `nodejs_compat` requirement).
 
 ## Required bindings
 

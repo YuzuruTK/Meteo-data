@@ -1,8 +1,10 @@
 import { loadEnabledSources } from "./config/config";
 import { runCollection } from "./collector/collector";
 import { handleApi } from "./dashboard/api";
+import { handleForecastApi } from "./forecast/api";
 import { handlePushApi } from "./push/api";
 import { runRainAlerts, buildPushSendOptions } from "./push/alerts";
+import { sendPushNotifications } from "./push/send";
 import type { Env } from "./db/types";
 
 /**
@@ -38,12 +40,26 @@ export default {
   fetch: async (request: Request, env: Env): Promise<Response> => {
     const url = new URL(request.url);
 
+    // Forecast API (Open-Meteo). Independent of observations; handles its own
+    // caching and graceful degradation.
+    if (url.pathname === "/api/forecast") {
+      const forecastResponse = await handleForecastApi(request);
+      if (forecastResponse) {
+        return forecastResponse;
+      }
+    }
+
     // Public dashboard API.
     if (url.pathname.startsWith("/api/") && request.method === "GET") {
       const response = await handleApi(request, env.DB);
       if (response) {
         return response;
       }
+    }
+
+    // Secret-protected push test trigger.
+    if (url.pathname === "/api/push/test" && request.method === "POST") {
+      return handlePushTest(request, env);
     }
 
     // Push subscription management endpoints.
@@ -112,6 +128,48 @@ async function loadLatestStations(
     )
     .all<{ stationId: string; stationName: string; rainRateMmH: number | null }>();
   return res.results ?? [];
+}
+
+/**
+ * Secret-protected test trigger: sends a sample notification to every stored
+ * subscription so the push pipeline can be verified end-to-end without waiting
+ * for real rain. Uses the same `x-collector-trigger` secret as the manual
+ * collection trigger.
+ */
+async function handlePushTest(request: Request, env: Env): Promise<Response> {
+  const secret = env.COLLECTOR_TRIGGER_SECRET;
+  if (secret) {
+    const provided = request.headers.get(TRIGGER_HEADER);
+    if (provided !== secret) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+  } else {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  const pushOptions = buildPushSendOptions(env);
+  if (!pushOptions) {
+    return Response.json(
+      { error: "VAPID keys are not configured" },
+      { status: 500 },
+    );
+  }
+
+  const delivery = await sendPushNotifications(
+    env.DB,
+    pushOptions,
+    {
+      title: "🧪 Test notification",
+      body: "This is a test push from the Meteo dashboard.",
+      data: { url: "/" },
+    },
+  );
+
+  return Response.json({
+    sent: delivery.sent,
+    removed: delivery.removed,
+    errors: delivery.errors,
+  });
 }
 
 /** Handle the authenticated manual collection trigger. */

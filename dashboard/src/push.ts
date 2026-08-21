@@ -72,14 +72,34 @@ export async function subscribeToPush(): Promise<PushSubscription> {
     throw new Error("Notification permission was not granted");
   }
 
-  const registration = await registerServiceWorker();
+  let registration: ServiceWorkerRegistration;
+  try {
+    registration = await registerServiceWorker();
+  } catch (err) {
+    throw new Error(
+      "Service Worker registration failed — check that the site is served over HTTPS.",
+    );
+  }
+
   const publicKey = await fetchPublicKey();
-  const subscription =
-    (await registration.pushManager.getSubscription()) ??
-    (await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    }));
+  let subscription: PushSubscription;
+  try {
+    subscription =
+      (await registration.pushManager.getSubscription()) ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      }));
+  } catch (err) {
+    const name = err instanceof DOMException ? err.name : "";
+    const detail =
+      name === "NotAllowedError"
+        ? "Notification permission was denied or the system blocks notifications."
+        : name === "AbortError"
+          ? "The push service request was aborted — try again in a moment."
+          : "Push service unavailable. On Android, this usually means the device has no Google Play Services or a signed-in Google account (emulators often fail here). Try a real device with Chrome and a Google account.";
+    throw new Error(detail);
+  }
 
   await sendSubscriptionToBackend(subscription);
   return subscription;

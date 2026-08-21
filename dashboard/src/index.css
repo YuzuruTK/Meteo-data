@@ -95,6 +95,12 @@ td:last-child, th:last-child { text-align: right; }
 /* --- Precipitation total --- */
 .today-value { font-size: 1.5rem; font-weight: 700; color: #1f2933; text-align: center; }
 
+/* --- Forecast summary (Open-Meteo) --- */
+.forecast-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.forecast-temp { font-size: 1.4rem; font-weight: 700; color: #1f2933; margin-bottom: 4px; }
+.forecast-detail { font-size: 0.82rem; color: #52606d; margin-bottom: 2px; }
+.forecast-attribution { margin-top: 6px; font-size: 0.7rem; color: #9aa5b1; }
+
 /* --- Rain Alerts / Notification settings --- */
 .notification-card { margin-bottom: 20px; }
 .notification-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 0.9rem; }

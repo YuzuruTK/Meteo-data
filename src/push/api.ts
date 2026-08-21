@@ -1,6 +1,6 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { insertSubscription, removeSubscription } from "./subscriptions";
-import { normalizePublicKey } from "./vapid";
+import { normalizePublicKey, validatePublicKeyFormat } from "./vapid";
 
 /**
  * Public HTTP handlers for anonymous push subscription management.
@@ -41,7 +41,12 @@ export async function handlePushApi(
     if (!env.VAPID_PUBLIC_KEY) {
       return json({ error: "VAPID_PUBLIC_KEY is not configured" }, 500);
     }
-    return json({ publicKey: normalizePublicKey(env.VAPID_PUBLIC_KEY) });
+    const normalized = normalizePublicKey(env.VAPID_PUBLIC_KEY);
+    const invalid = validatePublicKeyFormat(normalized);
+    if (invalid) {
+      return json({ error: invalid }, 500);
+    }
+    return json({ publicKey: normalized });
   }
 
   // Subscribe — store the endpoint + keys.

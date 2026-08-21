@@ -43,4 +43,9 @@ export default defineConfig({
     }),
   ],
   base: "/",
+  server: {
+    proxy: {
+      "/api": "http://localhost:8787",
+    },
+  },
 });

@@ -1,5 +1,5 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import webpush from "web-push";
+import { sendNotification } from "web-push-neo";
 import { listSubscriptions, removeSubscription } from "./subscriptions";
 
 export interface PushNotificationPayload {
@@ -28,7 +28,7 @@ export interface PushDeliveryResult {
 /**
  * Send a notification to every stored subscription.
  *
- * - Configures VAPID details on each call (read from env bindings).
+ * - Passes VAPID details on each call (read from env bindings).
  * - Batch-delivers to all subscribers.
  * - Removes subscriptions that respond 404/410 (expired/gone) so the database
  *   does not accumulate stale endpoints.
@@ -40,8 +40,6 @@ export async function sendPushNotifications(
   opts: PushSendOptions,
   payload: PushNotificationPayload,
 ): Promise<PushDeliveryResult> {
-  webpush.setVapidDetails(opts.subject, opts.publicKey, opts.privateKey);
-
   const subscriptions = await listSubscriptions(db);
 
   const result: PushDeliveryResult = { sent: 0, removed: 0, errors: [] };
@@ -53,13 +51,18 @@ export async function sendPushNotifications(
     await Promise.all(
       batch.map(async (sub) => {
         try {
-          await webpush.sendNotification(
+          await sendNotification(
             {
               endpoint: sub.endpoint,
               keys: { p256dh: sub.p256dh, auth: sub.auth },
             },
             JSON.stringify(payload),
             {
+              vapidDetails: {
+                subject: opts.subject,
+                publicKey: opts.publicKey,
+                privateKey: opts.privateKey,
+              },
               TTL: 60 * 60, // keep for delivery for an hour, then expire
             },
           );
@@ -91,10 +94,12 @@ export async function sendPushNotificationToOne(
   subscription: { endpoint: string; keys: { p256dh: string; auth: string } },
   payload: PushNotificationPayload,
 ): Promise<void> {
-  webpush.setVapidDetails(opts.subject, opts.publicKey, opts.privateKey);
-  await webpush.sendNotification(
-    subscription,
-    JSON.stringify(payload),
-    { TTL: 60 * 60 },
-  );
+  await sendNotification(subscription, JSON.stringify(payload), {
+    vapidDetails: {
+      subject: opts.subject,
+      publicKey: opts.publicKey,
+      privateKey: opts.privateKey,
+    },
+    TTL: 60 * 60,
+  });
 }
