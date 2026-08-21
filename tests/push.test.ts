@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
-import { checkAndRecordRainState, buildRainMessage, rainBucket } from "../src/push/rain";
+import { checkAndRecordRainState, buildRainMessage, rainBucket, RAIN_THRESHOLD_MM_H } from "../src/push/rain";
 import { insertSubscription, removeSubscription, listSubscriptions } from "../src/push/subscriptions";
 import { validatePublicKeyFormat, toBase64Url } from "../src/push/vapid";
 
@@ -82,24 +82,30 @@ describe("rain state detection", () => {
   it("alerts only on a dry -> wet transition", async () => {
     const db = new FakeD1();
 
+    // First observation: initialises state silently, no alert.
     const first = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
       { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 5 },
     ]);
-    expect(first.alerts).toHaveLength(1);
-    expect(first.alerts[0]?.stationName).toBe("Ijuí");
+    expect(first.alerts).toHaveLength(0);
+    expect(first.updated).toBe(1);
 
+    // Still raining — no transition, no alert.
     const second = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:05:00Z", [
       { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 8 },
     ]);
     expect(second.alerts).toHaveLength(0);
 
+    // Dry.
     await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T11:00:00Z", [
       { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 0 },
     ]);
+
+    // Dry -> wet transition — alert fires.
     const third = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T11:05:00Z", [
       { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 3 },
     ]);
     expect(third.alerts).toHaveLength(1);
+    expect(third.alerts[0]?.stationName).toBe("Ijuí");
   });
 
   it("does not alert when dry", async () => {
@@ -109,6 +115,44 @@ describe("rain state detection", () => {
     ]);
     expect(result.alerts).toHaveLength(0);
     expect(result.updated).toBe(1);
+  });
+});
+
+describe("rain threshold and initialization", () => {
+  it("does not alert on first observation even when raining", async () => {
+    const db = new FakeD1();
+    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
+      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 2.0 },
+    ]);
+    expect(result.alerts).toHaveLength(0);
+    expect(result.updated).toBe(1);
+  });
+
+  it("alerts on dry -> wet transition after state is initialised", async () => {
+    const db = new FakeD1();
+    // Seed state as dry.
+    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
+
+    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
+      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 2.0 },
+    ]);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.alerts[0]?.stationName).toBe("Ijuí");
+  });
+
+  it("ignores sensor noise below the rain threshold", async () => {
+    const db = new FakeD1();
+    // Seed state as dry so a transition would normally fire.
+    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
+
+    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
+      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 0.05 },
+    ]);
+    expect(result.alerts).toHaveLength(0);
+  });
+
+  it("RAIN_THRESHOLD_MM_H is 0.1", () => {
+    expect(RAIN_THRESHOLD_MM_H).toBe(0.1);
   });
 });
 

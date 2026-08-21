@@ -13,6 +13,9 @@ export interface RainAlertMessage {
   body: string;
 }
 
+/** Rain rate threshold (mm/h). Values below this are treated as sensor noise. */
+export const RAIN_THRESHOLD_MM_H = 0.1;
+
 export interface RainCheckResult {
   /** Stations that just started raining (dry -> wet) and should be alerted. */
   alerts: Array<{ stationId: string; stationName: string; message: RainAlertMessage }>;
@@ -72,7 +75,9 @@ export async function checkAndRecordRainState(
   let updated = 0;
 
   for (const station of stations) {
-    const raining = station.rainRateMmH !== null && station.rainRateMmH > 0;
+    const raining =
+      station.rainRateMmH !== null &&
+      station.rainRateMmH >= RAIN_THRESHOLD_MM_H;
 
     // Read previous state (transactionally per station).
     const previous = await db
@@ -82,9 +87,13 @@ export async function checkAndRecordRainState(
       .bind(station.stationId)
       .first<{ raining: number }>();
 
+    const isFirstObservation = previous === null;
     const wasRaining = previous ? previous.raining === 1 : false;
 
-    if (raining && !wasRaining) {
+    // Do not alert on the first observation — a fresh deployment with no
+    // prior state should only initialise the current status silently.
+    // Alerts fire exclusively on a true dry → wet transition.
+    if (!isFirstObservation && raining && !wasRaining) {
       alerts.push({
         stationId: station.stationId,
         stationName: station.stationName,
