@@ -55,6 +55,10 @@ export interface StationRow {
   id: string;
   source_id: string;
   name: string;
+  /** ISO-8601 timestamp of the most recent observation for this station. */
+  last_observed_at: string | null;
+  /** True when the most recent observation is older than the stale threshold. */
+  stale: boolean;
 }
 
 /**
@@ -103,33 +107,55 @@ export async function getHourlyAverages(
   return result.all<HourlyAverageRow>().then((r) => r.results ?? []);
 }
 
+/** Default stale threshold in minutes. */
+export const DEFAULT_STALE_MINUTES = 15;
+
 /**
  * List stations that have observations in the given lookback window, so the
  * dashboard can populate a selector. Falls back to all stations if there are
  * no observations in range.
+ *
+ * Each station includes `last_observed_at` (the most recent observation
+ * timestamp) and a `stale` flag that is true when the latest observation is
+ * older than `staleMinutes` (default 15).
  */
 export async function getStations(
   db: D1Database,
-  opts: { hours?: number } = {},
+  opts: { hours?: number; staleMinutes?: number } = {},
 ): Promise<StationRow[]> {
   const hours = opts.hours ?? 24;
   const hoursClamped = Math.max(1, Math.min(24 * 30, Math.floor(hours)));
+  const staleMinutes = opts.staleMinutes ?? DEFAULT_STALE_MINUTES;
 
   const recent = await db
     .prepare(
-      `SELECT DISTINCT
+      `SELECT
          wl.id AS id,
          wl.source_id AS source_id,
-         wl.name AS name
+         wl.name AS name,
+         MAX(o.observed_at) AS last_observed_at,
+         CASE
+           WHEN MAX(o.observed_at) < datetime('now', '-${staleMinutes} minutes') THEN 1
+           ELSE 0
+         END AS stale
        FROM weather_observations o
        JOIN weather_locations wl ON wl.id = o.location_id
        WHERE o.observed_at >= datetime('now', '-${hoursClamped} hours')
+       GROUP BY wl.id
        ORDER BY wl.name ASC, wl.id ASC`,
     )
-    .all<StationRow>();
+    .all<{ id: string; source_id: string; name: string; last_observed_at: string | null; stale: number }>();
 
-  if ((recent.results ?? []).length > 0) {
-    return recent.results ?? [];
+  const results = (recent.results ?? []).map((r) => ({
+    id: r.id,
+    source_id: r.source_id,
+    name: r.name,
+    last_observed_at: r.last_observed_at,
+    stale: r.stale === 1,
+  }));
+
+  if (results.length > 0) {
+    return results;
   }
 
   // Fallback: list every configured location, even if it has no observations yet.
@@ -138,7 +164,13 @@ export async function getStations(
       `SELECT id, source_id, name FROM weather_locations
        ORDER BY name ASC, id ASC`,
     )
-    .all<StationRow>();
+    .all<{ id: string; source_id: string; name: string }>();
 
-  return all.results ?? [];
+  return (all.results ?? []).map((r) => ({
+    id: r.id,
+    source_id: r.source_id,
+    name: r.name,
+    last_observed_at: null,
+    stale: false,
+  }));
 }

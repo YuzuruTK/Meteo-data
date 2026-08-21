@@ -21,6 +21,7 @@ interface Prepared {
 class FakeD1 {
   observations: Row[] = [];
   locations: Row[] = [];
+  summary: Row[] = [];
 
   prepare(sql: string): Prepared {
     return {
@@ -36,6 +37,26 @@ class FakeD1 {
     return {
       async all(): Promise<{ results: Row[] }> {
         const observed = sql.includes("weather_observations");
+
+        // Stations query: latest-observation-per-station with a stale flag.
+        if (observed && sql.includes("MAX(o.observed_at)")) {
+          const results: Row[] = [];
+          const seen = new Set<string>();
+          for (const o of self.observations) {
+            const loc = self.locations.find((l) => l.id === o.location_id);
+            if (!loc || seen.has(loc.id as string)) continue;
+            seen.add(loc.id as string);
+            const lastObservedAt = self.latestObservedAt(o.location_id as string);
+            results.push({
+              id: loc.id,
+              source_id: loc.source_id,
+              name: loc.name,
+              last_observed_at: lastObservedAt,
+              stale: lastObservedAt !== null && self.isStale(lastObservedAt) ? 1 : 0,
+            });
+          }
+          return { results };
+        }
 
         if (observed && sql.includes("weather_locations") && sql.includes("GROUP BY")) {
           // Aggregate query: group by location + hour, optionally filtered by station.
@@ -89,13 +110,17 @@ class FakeD1 {
               id: loc.id as string,
               source_id: loc.source_id as string,
               name: loc.name as string,
-            });
+            } as StationRow);
           }
           return { results: results as unknown as Row[] };
         }
 
         if (sql.includes("FROM weather_locations") && !observed) {
           return { results: self.locations as Row[] };
+        }
+
+        if (sql.includes("FROM dashboard_summary")) {
+          return { results: self.summary as Row[] };
         }
 
         return { results: [] };
@@ -121,6 +146,21 @@ class FakeD1 {
     const d = new Date(ts);
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:00`;
+  }
+
+  private latestObservedAt(locationId: string): string | null {
+    let latest: string | null = null;
+    for (const o of this.observations) {
+      if (o.location_id !== locationId) continue;
+      const ts = o.observed_at as string;
+      if (latest === null || ts > latest) latest = ts;
+    }
+    return latest;
+  }
+
+  isStale(ts: string): boolean {
+    const d = new Date(ts).getTime();
+    return new Date().getTime() - d > 15 * 60 * 1000;
   }
 }
 
@@ -181,6 +221,54 @@ describe("dashboard aggregation", () => {
     const stations = await getStations(db as unknown as D1Database, { hours: 24 });
     expect(stations).toHaveLength(1);
     expect(stations[0]?.id).toBe("loc-1");
+  });
+
+  it("flags stations as stale when their latest observation is old", async () => {
+    const db = new FakeD1();
+    db.locations.push(
+      { id: "loc-1", source_id: "src", name: "Fresh" },
+      { id: "loc-2", source_id: "src", name: "Old" },
+    );
+    // Set stale directly on the mock data so the test does not depend on
+    // wall-clock timing.
+    db.observations.push(
+      { location_id: "loc-1", observed_at: "2025-06-01T12:00:00Z", temperature: 20 },
+      { location_id: "loc-2", observed_at: "2020-01-01T00:00:00Z", temperature: 30 },
+    );
+    // Override isStale for this test: loc-1 is fresh, loc-2 is stale.
+    db.isStale = (ts: string) => ts.startsWith("2020");
+
+    const stations = await getStations(db as unknown as D1Database, { hours: 24 * 365 * 10, staleMinutes: 15 });
+    const fresh = stations.find((s) => s.id === "loc-1");
+    const stale = stations.find((s) => s.id === "loc-2");
+    expect(fresh?.stale).toBe(false);
+    expect(fresh?.last_observed_at).toBe("2025-06-01T12:00:00Z");
+    expect(stale?.stale).toBe(true);
+    expect(stale?.last_observed_at).toBe("2020-01-01T00:00:00Z");
+  });
+});
+
+describe("dashboard summary API", () => {
+  it("returns the precomputed summary for /api/summary", async () => {
+    const db = new FakeD1();
+    db.summary.push({
+      location_id: "loc-1",
+      station_name: "Ijuí",
+      observed_at: "2025-01-01T10:00:00Z",
+      temperature: 20,
+      humidity: 60,
+    });
+
+    const req = new Request("https://example.workers.dev/api/summary", {
+      method: "GET",
+      headers: { origin: "https://example.workers.dev" },
+    });
+    const res = await handleApi(req, db as unknown as D1Database);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as { summaries: Row[] };
+    expect(body.summaries).toHaveLength(1);
+    expect(body.summaries[0]?.station_name).toBe("Ijuí");
   });
 });
 

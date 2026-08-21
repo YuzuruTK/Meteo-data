@@ -10,6 +10,8 @@ import type {
 import { upsertLocation } from "../db/locations";
 import { insertObservation } from "../db/observations";
 import { createRun, finishRun, logRequest } from "../db/runs";
+import { updateDashboardSummary } from "../dashboard/summary";
+import { rollupObservations } from "../db/rollups";
 
 /**
  * Collection orchestration.
@@ -98,6 +100,16 @@ export async function runCollection(
     requestsSucceeded,
     requestsFailed,
   });
+
+  // Maintain historical rollups (hourly + daily). Best-effort: a rollup
+  // failure must not fail the collection run.
+  if (requestsSucceeded > 0) {
+    try {
+      await rollupObservations(env.DB);
+    } catch (rollupErr) {
+      console.warn(`[collector] observation rollup failed: ${errMessage(rollupErr)}`);
+    }
+  }
 
   return {
     id: runId,
@@ -252,6 +264,19 @@ async function collectOne(
     const stored = await insertObservation(env.DB, observation);
     const finishedAt = new Date().toISOString();
     const responseTimeMs = Date.now() - start;
+
+    // Maintain the precomputed dashboard summary so the dashboard can serve
+    // latest readings without scanning raw observations.
+    try {
+      await updateDashboardSummary(env.DB, observation, location.name, finishedAt);
+    } catch (summaryErr) {
+      // Summary update is best-effort; a failure here must not fail the
+      // collection run.
+      console.warn(
+        `[collector] ${source.id} / ${location.id}: dashboard summary update failed: ${errMessage(summaryErr)}`,
+      );
+    }
+
     await logRequest(env.DB, {
       id: crypto.randomUUID(),
       runId,
