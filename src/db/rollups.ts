@@ -142,6 +142,16 @@ export async function rollupObservations(
 
   // Build the daily rollup from the hourly table, weighting AVG columns by
   // observation_count so daily averages remain exact.
+  //
+  // Daily rollup correctness: the hourly recomputation is intentionally
+  // bounded to the recent window, but the daily rollup must always cover the
+  // **complete** calendar day for any day that has at least one hourly bucket
+  // inside the window.  Otherwise a partial-day window would overwrite a
+  // previously-complete daily aggregate with truncated data.
+  //
+  // Strategy:
+  //   1. Find the distinct calendar days touched by the recent hourly window.
+  //   2. Re-aggregate ALL hourly rows for those entire days.
   const dailyAvgExpr = DAILY_AVG_COLUMNS.map(
     (c) =>
       `CASE WHEN SUM(observation_count) = 0 THEN NULL
@@ -183,7 +193,11 @@ export async function rollupObservations(
        )
        SELECT ${dailySelectColumns}
        FROM weather_observations_hourly
-       WHERE hour >= datetime('now', '-${hours} hours')
+       WHERE substr(hour, 1, 10) IN (
+         SELECT DISTINCT substr(hour, 1, 10)
+         FROM weather_observations_hourly
+         WHERE hour >= datetime('now', '-${hours} hours')
+       )
        GROUP BY location_id, day
        ON CONFLICT(location_id, day) DO UPDATE SET
          ${dailyUpsertSet}`,
