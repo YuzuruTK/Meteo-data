@@ -16,6 +16,14 @@
       "migrations_dir": "migrations"
     }
   ],
+  "vars": {
+    "FORECAST_LOW_TEMP_C": "5",
+    "FORECAST_TEMP_VARIATION_C": "10",
+    "FORECAST_CONSECUTIVE_TEMP_CHANGE_C": "5",
+    "FORECAST_RAIN_PROBABILITY_PERCENT": "60",
+    "FORECAST_RAIN_START_SHIFT_MINUTES": "60",
+    "FORECAST_ALERT_HORIZON_HOURS": "24"
+  },
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,
