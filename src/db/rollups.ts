@@ -5,7 +5,17 @@ import type { D1Database } from "@cloudflare/workers-types";
  *
  * Maintains `weather_observations_hourly` and `weather_observations_daily`
  * rollup tables so historical analytics do not have to scan the raw dataset.
- * Raw observations remain untouched; no destructive pruning is performed.
+ * Raw observations remain untouched; the only pruning performed is the
+ * retention of hourly aggregates (see HOURLY_RETENTION_DAYS below).
+ *
+ * KNOWN LIMITATION — wind direction averaging:
+ *
+ * `wind_direction_avg` is computed with a simple arithmetic mean (`AVG()`).
+ * This is not mathematically correct for circular variables: e.g. for
+ * 359° + 1° the correct mean is 0°, but `AVG()` yields 180°. A future fix
+ * should use a circular mean based on sine/cosine components
+ * (atan2(mean(sin θ), mean(cos θ))). The limitation is documented here on
+ * purpose; the schema and queries are intentionally left unchanged for now.
  *
  * The rollup is idempotent: it recomputes a bounded recent window (default
  * 24 hours) and upserts into the rollup tables on every call.  Re-running is
@@ -18,6 +28,18 @@ import type { D1Database } from "@cloudflare/workers-types";
 
 /** How many recent hours to (re)roll-up on each run. */
 export const ROLLUP_WINDOW_HOURS = 24;
+
+/**
+ * How many days of hourly aggregates to keep.
+ *
+ * Retention policy: hourly rollups are an optimization cache; keeping them
+ * forever would make the D1 database grow unbounded. After the daily rollup
+ * is generated, hourly aggregates older than this many days are deleted.
+ * Raw observations (`weather_observations`) and daily aggregates
+ * (`weather_observations_daily`) are never pruned, so historical data can
+ * always be re-derived if needed.
+ */
+export const HOURLY_RETENTION_DAYS = 180;
 
 const HOURLY_AVG_COLUMNS = [
   "temperature",
@@ -201,6 +223,17 @@ export async function rollupObservations(
        GROUP BY location_id, day
        ON CONFLICT(location_id, day) DO UPDATE SET
          ${dailyUpsertSet}`,
+    )
+    .run();
+
+  // Retention: prune hourly aggregates older than HOURLY_RETENTION_DAYS.
+  // This runs after the daily rollup so the daily table is always derived
+  // before any hourly rows are removed. Only `weather_observations_hourly`
+  // is affected — raw observations and daily aggregates are never deleted.
+  await db
+    .prepare(
+      `DELETE FROM weather_observations_hourly
+       WHERE hour < datetime('now', '-${HOURLY_RETENTION_DAYS} days')`,
     )
     .run();
 
