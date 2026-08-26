@@ -1,157 +1,172 @@
-const translations: Record<string, string> = {
-  "Meteo Data Dashboard": "Painel Meteo Data",
-  "Station": "Estação",
-  "All stations": "Todas as estações",
-  "Range": "Período",
-  "Show pressure": "Mostrar pressão",
-  "Loading…": "Carregando…",
-  "Latest readings": "Leituras mais recentes",
-  "Temperature": "Temperatura",
-  "Humidity": "Umidade",
-  "UV Index": "Índice UV",
-  "UV index": "Índice UV",
-  "Solar radiation": "Radiação solar",
-  "Rain": "Chuva",
-  "Wind": "Vento",
-  "Pressure": "Pressão",
-  "Today": "Hoje",
-  "Forecast": "Previsão",
-  "Rain next 6h": "Chuva nas próximas 6h",
-  "Forecast provided by Open-Meteo": "Previsão fornecida por Open-Meteo",
-  "Dry": "Seco",
-  "Comfortable": "Confortável",
-  "Humid": "Úmido",
-  "Very Humid": "Muito úmido",
-  "Low": "Baixo",
-  "Moderate": "Moderado",
-  "High": "Alto",
-  "Very High": "Muito alto",
-  "Extreme": "Extremo",
-  "Very Low": "Muito baixa",
-  "Drizzle": "Garoa",
-  "Heavy Rain": "Chuva forte",
-  "Storm": "Tempestade",
-  "Calm": "Calmo",
-  "Light": "Fraco",
-  "Strong": "Forte",
-  "Very Strong": "Muito forte",
-  "Rising": "Subindo",
-  "Falling": "Descendo",
-  "Stable": "Estável",
-  "Latest hourly averages": "Médias horárias mais recentes",
-  "Average of latest readings": "Média das leituras mais recentes",
-  "Hour": "Horário",
-  "Temperature Forecast": "Previsão de temperatura",
-  "Humidity Forecast": "Previsão de umidade",
-  "Cloud Cover Forecast": "Previsão de nebulosidade",
-  "Pressure Forecast": "Previsão de pressão",
-  "Wind Speed Forecast": "Previsão de velocidade do vento",
-  "Precip. Rate Forecast": "Previsão de taxa de precipitação",
-  "Precipitation Forecast": "Previsão de precipitação",
-  "Precip. rate": "Taxa de precipitação",
-  "Precip. total": "Precipitação total",
-  "Wind speed": "Velocidade do vento",
-  "Wind gust": "Rajada de vento",
-  "Wind direction": "Direção do vento",
-  "Status": "Status",
-  "Allowed": "Permitido",
-  "Blocked": "Bloqueado",
-  "Ask": "Solicitar",
-  "Unavailable": "Indisponível",
-  "Alerts": "Alertas",
-  "Checking…": "Verificando…",
-  "Subscribed to rain alerts": "Inscrito nos alertas de chuva",
-  "Not subscribed": "Não inscrito",
-  "Subscribe": "Inscrever-se",
-  "Unsubscribe": "Cancelar inscrição",
-  "Rain Alerts": "Alertas de chuva",
-  "Push notifications are not supported in this browser.": "As notificações push não são compatíveis com este navegador.",
-  "You'll get a notification when rain starts at a station. No account needed.": "Você receberá uma notificação quando começar a chover em uma estação. Não é necessário ter uma conta.",
-};
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { en } from "./locales/en";
+import { es } from "./locales/es";
+import { ptBR } from "./locales/pt-BR";
 
-const translationEntries = Object.entries(translations).sort(([a], [b]) => b.length - a.length);
-const sourcePattern = new RegExp(translationEntries.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"));
+export type Locale = "pt-BR" | "en" | "es";
 
-function translateText(text: string): string {
-  if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text) && !/\b(?:station|stations|gust|no data)\b/.test(text)) return text;
-  let result = text;
-  for (const [source, target] of translationEntries) result = result.split(source).join(target);
-  result = result.replace(/(\d+)\s+hours/g, "$1 horas");
-  result = result.replace(/\bstations\b/g, "estações");
-  result = result.replace(/\bstation\b/g, "estação");
-  result = result.replace(/\bgust\b/g, "rajada");
-  result = result.replace(/\bno data\b/g, "sem dados");
+const STORAGE_KEY = "meteo-data-locale";
+const DEFAULT_LOCALE: Locale = "pt-BR";
+const resources: Record<Locale, Record<string, string>> = { "pt-BR": ptBR, en, es };
+const supportedLocales = Object.keys(resources) as Locale[];
+
+const originalText = new WeakMap<Text, string>();
+const originalAttributes = new WeakMap<Element, Map<string, string>>();
+let activeLocale: Locale = DEFAULT_LOCALE;
+let observer: MutationObserver | null = null;
+let applying = false;
+let frame: number | null = null;
+const pending = new Set<Node>();
+
+function isSupported(value: string | null | undefined): value is Locale {
+  return !!value && supportedLocales.includes(value as Locale);
+}
+
+export function detectLocale(): Locale {
+  if (typeof window === "undefined") return DEFAULT_LOCALE;
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (isSupported(stored)) return stored;
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  for (const language of languages) {
+    const normalized = language.toLowerCase();
+    if (normalized === "pt-br" || normalized.startsWith("pt-")) return "pt-BR";
+    if (normalized === "en" || normalized.startsWith("en-")) return "en";
+    if (normalized === "es" || normalized.startsWith("es-")) return "es";
+  }
+  return DEFAULT_LOCALE;
+}
+
+export function translateValue(value: string, locale: Locale): string {
+  if (locale === "en") return value;
+  let result = value;
+  for (const [source, target] of Object.entries(resources[locale]).sort(([a], [b]) => b.length - a.length)) {
+    result = result.split(source).join(target);
+  }
+  result = result.replace(/(\d+)\s+hours\b/g, "$1 horas");
+  if (locale === "pt-BR") {
+    result = result.replace(/\bstations\b/g, "estações").replace(/\bstation\b/g, "estação").replace(/\bgust\b/g, "rajada").replace(/\bno data\b/g, "sem dados");
+  } else {
+    result = result.replace(/\bstations\b/g, "estaciones").replace(/\bstation\b/g, "estación").replace(/\bgust\b/g, "ráfaga").replace(/\bno data\b/g, "sin datos");
+  }
   return result;
 }
 
-function translateTextNodes(root: Node): void {
-  if (root.nodeType === Node.TEXT_NODE) {
-    const textNode = root as Text;
-    const translated = translateText(textNode.nodeValue ?? "");
-    if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
-    return;
-  }
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes: Text[] = [];
-  let node: Node | null;
-  while ((node = walker.nextNode())) nodes.push(node as Text);
-  for (const textNode of nodes) {
-    const translated = translateText(textNode.nodeValue ?? "");
-    if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
-  }
+function shouldIgnore(node: Node): boolean {
+  return node.parentElement?.closest("[data-i18n-ignore]") !== null;
+}
+
+function translateTextNode(node: Text): void {
+  if (shouldIgnore(node)) return;
+  const current = node.nodeValue ?? "";
+  if (!originalText.has(node)) originalText.set(node, current);
+  const source = originalText.get(node) ?? current;
+  const translated = translateValue(source, activeLocale);
+  if (translated !== current) node.nodeValue = translated;
 }
 
 function translateAttributes(root: ParentNode): void {
   for (const element of root.querySelectorAll<HTMLElement>("[title], [aria-label]")) {
+    if (element.closest("[data-i18n-ignore]")) continue;
+    let values = originalAttributes.get(element);
+    if (!values) { values = new Map(); originalAttributes.set(element, values); }
     for (const attribute of ["title", "aria-label"] as const) {
       const value = element.getAttribute(attribute);
-      if (value) {
-        const translated = translateText(value);
-        if (translated !== value) element.setAttribute(attribute, translated);
-      }
+      if (value === null) continue;
+      if (!values.has(attribute)) values.set(attribute, value);
+      element.setAttribute(attribute, translateValue(values.get(attribute) ?? value, activeLocale));
     }
   }
 }
 
-export function installPortugueseTranslation(): () => void {
+function translateRoot(root: Node): void {
+  if (root.nodeType === Node.TEXT_NODE) { translateTextNode(root as Text); return; }
+  if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+  if (root instanceof Element && root.hasAttribute("data-i18n-ignore")) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) nodes.push(node as Text);
+  for (const textNode of nodes) translateTextNode(textNode);
+  if (root instanceof Element || root instanceof DocumentFragment) translateAttributes(root);
+}
+
+function flushPending(): void {
+  frame = null;
+  applying = true;
+  try { for (const node of pending) if (node.isConnected || node === document.body) translateRoot(node); }
+  finally { pending.clear(); applying = false; }
+}
+
+function schedule(node: Node): void {
+  pending.add(node);
+  if (frame === null) frame = window.requestAnimationFrame(flushPending);
+}
+
+export function applyLocale(locale: Locale): void {
+  activeLocale = locale;
+  if (typeof document === "undefined") return;
+  applying = true;
+  try {
+    document.documentElement.lang = locale;
+    document.title = translateValue("Meteo Data Dashboard", locale);
+    if (document.body) translateRoot(document.body);
+  } finally { applying = false; }
+}
+
+export function getActiveLocale(): Locale { return activeLocale; }
+
+export function formatHour(hour: string): string {
+  const d = new Date(hour + ":00Z");
+  if (Number.isNaN(d.getTime())) return hour;
+  return d.toLocaleString(activeLocale === "pt-BR" ? "pt-BR" : activeLocale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function startObserver(): () => void {
   if (typeof document === "undefined" || !document.body) return () => undefined;
-  document.documentElement.lang = "pt-BR";
-  document.title = translations["Meteo Data Dashboard"];
-
-  translateTextNodes(document.body);
-  translateAttributes(document.body);
-
-  const pending = new Set<Node>();
-  let frame: number | null = null;
-  const flush = () => {
-    frame = null;
-    for (const node of pending) {
-      if (node.isConnected) {
-        translateTextNodes(node);
-        if (node instanceof Element) translateAttributes(node);
-      }
-    }
-    pending.clear();
-  };
-  const schedule = (node: Node) => {
-    pending.add(node);
-    if (frame === null) frame = window.requestAnimationFrame(flush);
-  };
-
-  const observer = new MutationObserver((mutations) => {
+  observer?.disconnect();
+  observer = new MutationObserver((mutations) => {
+    if (applying) return;
     for (const mutation of mutations) {
-      if (mutation.type === "characterData") schedule(mutation.target);
-      else {
+      if (mutation.type === "characterData") {
+        const text = mutation.target as Text;
+        if (!originalText.has(text)) originalText.set(text, text.nodeValue ?? "");
+        else if (text.nodeValue !== translateValue(originalText.get(text) ?? "", activeLocale)) originalText.set(text, text.nodeValue ?? "");
+        schedule(mutation.target);
+      } else {
         for (const node of mutation.addedNodes) schedule(node);
         if (mutation.target instanceof Element) schedule(mutation.target);
       }
     }
   });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-
+  applyLocale(activeLocale);
   return () => {
-    observer.disconnect();
+    observer?.disconnect(); observer = null;
     if (frame !== null) window.cancelAnimationFrame(frame);
-    pending.clear();
+    frame = null; pending.clear();
   };
 }
+
+interface I18nContextValue { locale: Locale; setLocale: (locale: Locale) => void; t: (value: string) => string; }
+const I18nContext = createContext<I18nContextValue | null>(null);
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [locale, setLocaleState] = useState<Locale>(detectLocale);
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next);
+    activeLocale = next;
+    if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, next);
+    applyLocale(next);
+  }, []);
+  useEffect(() => { activeLocale = locale; return startObserver(); }, []);
+  const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t: (value: string) => translateValue(value, locale) }), [locale, setLocale]);
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n(): I18nContextValue {
+  const context = useContext(I18nContext);
+  if (!context) throw new Error("useI18n must be used inside I18nProvider");
+  return context;
+}
+
+export { resources };
