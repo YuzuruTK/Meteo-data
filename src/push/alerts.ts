@@ -44,7 +44,9 @@ export async function runRainAlerts(
     };
   }
 
-  // Send one notification per alert (all subscribers get every rain start).
+  // Aggregate multiple simultaneous rain starts into a single push
+  // notification so subscribers receive one concise alert instead of N
+  // separate notifications.
   const result: AlertResult = {
     stationsUpdated: state.updated,
     alertsFired: state.alerts.length,
@@ -53,7 +55,8 @@ export async function runRainAlerts(
     errors: [],
   };
 
-  for (const alert of state.alerts) {
+  if (state.alerts.length === 1) {
+    const alert = state.alerts[0]!;
     const delivery = await sendPushNotifications(
       ctx.db,
       {
@@ -65,6 +68,25 @@ export async function runRainAlerts(
         title: alert.message.title,
         body: alert.message.body,
         data: { stationId: alert.stationId, url: "/" },
+      },
+    );
+    result.notificationsSent += delivery.sent;
+    result.notificationsRemoved += delivery.removed;
+    result.errors.push(...delivery.errors);
+  } else {
+    // Multiple stations started raining — send one aggregated notification.
+    const names = state.alerts.map((a) => a.stationName).join(", ");
+    const delivery = await sendPushNotifications(
+      ctx.db,
+      {
+        subject: ctx.vapid.subject,
+        publicKey: ctx.vapid.publicKey,
+        privateKey: ctx.vapid.privateKey,
+      },
+      {
+        title: `🌧️ Rain detected in ${state.alerts.length} stations`,
+        body: `Rain started in ${names}.`,
+        data: { url: "/" },
       },
     );
     result.notificationsSent += delivery.sent;

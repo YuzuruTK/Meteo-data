@@ -109,7 +109,20 @@ async function maybeRunRainAlerts(env: Env): Promise<void> {
   );
 }
 
-/** Load the latest precipitation rate + name for every station. */
+/** Stale threshold in minutes — stations whose latest observation is older
+ * than this are excluded from rain alerts. */
+const STALE_MINUTES = 15;
+
+/** Load the latest precipitation rate + name for every station.
+ *
+ * Uses a latest-observation-per-station query so that stations whose most
+ * recent observation arrived in a different collection batch are never
+ * omitted.  The correlated subquery on `observed_at` picks the single most
+ * recent row for each `location_id`.
+ *
+ * Stations whose latest observation is older than `STALE_MINUTES` are
+ * excluded from the result set so stale data never triggers a rain alert.
+ */
 async function loadLatestStations(
   db: Env["DB"],
 ): Promise<Array<{ stationId: string; stationName: string; rainRateMmH: number | null }>> {
@@ -121,9 +134,12 @@ async function loadLatestStations(
          o.precipitation_rate AS rainRateMmH
        FROM weather_observations o
        JOIN weather_locations wl ON wl.id = o.location_id
-       WHERE o.collected_at = (
-         SELECT MAX(collected_at) FROM weather_observations
+       WHERE o.observed_at = (
+         SELECT MAX(o2.observed_at)
+         FROM weather_observations o2
+         WHERE o2.location_id = o.location_id
        )
+         AND o.observed_at >= datetime('now', '-${STALE_MINUTES} minutes')
        ORDER BY wl.name ASC`,
     )
     .all<{ stationId: string; stationName: string; rainRateMmH: number | null }>();

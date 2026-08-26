@@ -1,6 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { getHourlyAverages, getStations } from "./aggregate";
 import { AGGREGATE_COLUMNS } from "./aggregate";
+import { getDashboardSummaries } from "./summary";
 
 function clampHours(value: string | null): number | undefined {
   if (!value) return undefined;
@@ -67,6 +68,11 @@ export async function handleApi(
       200,
       origin,
     );
+  }
+
+  if (pathMatches(url, "/api/summary")) {
+    const summaries = await getDashboardSummaries(db);
+    return json({ summaries }, 200, origin);
   }
 
   return null;

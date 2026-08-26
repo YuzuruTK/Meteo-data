@@ -22,8 +22,16 @@ class FakeD1 {
       first: () => Promise<Row | null>;
       all: () => Promise<{ results: Row[] }>;
     };
+    run: () => Promise<{ meta: { changes: number }; results?: Row[] }>;
+    first: () => Promise<Row | null>;
+    all: () => Promise<{ results: Row[] }>;
   } {
-    return { bind: (...args: unknown[]) => this.execute(_sql, args) };
+    return {
+      bind: (...args: unknown[]) => this.execute(_sql, args),
+      run: () => this.execute(_sql, []).run(),
+      first: () => this.execute(_sql, []).first(),
+      all: () => this.execute(_sql, []).all(),
+    };
   }
 
   private execute(sql: string, args: unknown[]) {

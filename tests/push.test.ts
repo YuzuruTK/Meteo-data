@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import { checkAndRecordRainState, buildRainMessage, rainBucket, RAIN_THRESHOLD_MM_H } from "../src/push/rain";
 import { insertSubscription, removeSubscription, listSubscriptions } from "../src/push/subscriptions";
 import { validatePublicKeyFormat, toBase64Url } from "../src/push/vapid";
+import { runRainAlerts } from "../src/push/alerts";
+import { sendNotification } from "web-push-neo";
+
+vi.mock("web-push-neo", () => ({
+  sendNotification: vi.fn().mockResolvedValue(undefined),
+}));
 
 type Row = Record<string, unknown>;
 
@@ -192,5 +198,30 @@ describe("push subscription persistence", () => {
 
     await removeSubscription(db as unknown as D1Database, sub.endpoint);
     expect((await listSubscriptions(db as unknown as D1Database)).length).toBe(0);
+  });
+});
+
+describe("rain alert notification aggregation", () => {
+  it("sends one aggregated notification when multiple stations start raining", async () => {
+    const db = new FakeD1();
+    await insertSubscription(db as unknown as D1Database, {
+      endpoint: "https://push.example/abc", p256dh: "A", auth: "B",
+    });
+    // Seed both stations as dry so a transition can be detected.
+    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
+    db.states.set("loc-2", { station_id: "loc-2", raining: 0 });
+
+    const result = await runRainAlerts({
+      db: db as unknown as D1Database,
+      vapid: { subject: "mailto:a@b.c", publicKey: "pk", privateKey: "sk" },
+      stations: [
+        { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 5 },
+        { stationId: "loc-2", stationName: "Floresta", rainRateMmH: 4 },
+      ],
+    });
+
+    expect(result.alertsFired).toBe(2);
+    // One aggregated notification (not two) for the two simultaneous rain starts.
+    expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 });
