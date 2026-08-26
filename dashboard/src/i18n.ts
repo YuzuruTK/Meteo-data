@@ -4,12 +4,12 @@ const translations: Record<string, string> = {
   "All stations": "Todas as estações",
   "Range": "Período",
   "Show pressure": "Mostrar pressão",
-  "hours": "horas",
   "Loading…": "Carregando…",
   "Latest readings": "Leituras mais recentes",
   "Temperature": "Temperatura",
   "Humidity": "Umidade",
   "UV Index": "Índice UV",
+  "UV index": "Índice UV",
   "Solar radiation": "Radiação solar",
   "Rain": "Chuva",
   "Wind": "Vento",
@@ -41,10 +41,6 @@ const translations: Record<string, string> = {
   "Latest hourly averages": "Médias horárias mais recentes",
   "Average of latest readings": "Média das leituras mais recentes",
   "Hour": "Horário",
-  "station": "estação",
-  "stations": "estações",
-  "gust": "rajada",
-  "no data": "sem dados",
   "Temperature Forecast": "Previsão de temperatura",
   "Humidity Forecast": "Previsão de umidade",
   "Cloud Cover Forecast": "Previsão de nebulosidade",
@@ -79,10 +75,15 @@ const sourcePattern = new RegExp(
 );
 
 function translateText(text: string): string {
-  if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text)) return text;
+  if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text) && !/\b(?:station|stations|gust|no data)\b/.test(text)) return text;
   let result = text;
   for (const [source, target] of translationEntries) result = result.replaceAll(source, target);
-  return result.replace(/(\d+)\s+hours/g, "$1 horas");
+  result = result.replace(/(\d+)\s+hours/g, "$1 horas");
+  result = result.replace(/\bstations\b/g, "estações");
+  result = result.replace(/\bstation\b/g, "estação");
+  result = result.replace(/\bgust\b/g, "rajada");
+  result = result.replace(/\bno data\b/g, "sem dados");
+  return result;
 }
 
 function translateTextNodes(root: Node): void {
