@@ -70,9 +70,7 @@ const translations: Record<string, string> = {
 };
 
 const translationEntries = Object.entries(translations).sort(([a], [b]) => b.length - a.length);
-const sourcePattern = new RegExp(
-  translationEntries.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-);
+const sourcePattern = new RegExp(translationEntries.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"));
 
 function translateText(text: string): string {
   if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text) && !/\b(?:station|stations|gust|no data)\b/.test(text)) return text;
