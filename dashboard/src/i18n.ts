@@ -75,7 +75,7 @@ const sourcePattern = new RegExp(translationEntries.map(([source]) => source.rep
 function translateText(text: string): string {
   if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text) && !/\b(?:station|stations|gust|no data)\b/.test(text)) return text;
   let result = text;
-  for (const [source, target] of translationEntries) result = result.replaceAll(source, target);
+  for (const [source, target] of translationEntries) result = result.split(source).join(target);
   result = result.replace(/(\d+)\s+hours/g, "$1 horas");
   result = result.replace(/\bstations\b/g, "estações");
   result = result.replace(/\bstation\b/g, "estação");
