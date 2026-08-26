@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { en } from "./locales/en";
-import { es } from "./locales/es";
-import { ptBR } from "./locales/pt-BR";
+import { es, postProcessEs } from "./locales/es";
+import { ptBR, postProcessPtBR } from "./locales/pt-BR";
 
 export type Locale = "pt-BR" | "en" | "es";
 
@@ -36,25 +36,38 @@ export function detectLocale(): Locale {
   return DEFAULT_LOCALE;
 }
 
+/**
+ * Translate a single string value into the given locale.
+ *
+ * First applies dictionary-based substitutions (longest-first to handle
+ * overlapping keys), then runs locale-specific post-processing rules
+ * (regex patterns, word-level substitutions, etc.).
+ */
 export function translateValue(value: string, locale: Locale): string {
   if (locale === "en") return value;
   let result = value;
   for (const [source, target] of Object.entries(resources[locale]).sort(([a], [b]) => b.length - a.length)) {
     result = result.split(source).join(target);
   }
-  result = result.replace(/(\d+)\s+hours\b/g, "$1 horas");
-  if (locale === "pt-BR") {
-    result = result.replace(/\bstations\b/g, "estações").replace(/\bstation\b/g, "estação").replace(/\bgust\b/g, "rajada").replace(/\bno data\b/g, "sem dados");
-  } else {
-    result = result.replace(/\bstations\b/g, "estaciones").replace(/\bstation\b/g, "estación").replace(/\bgust\b/g, "ráfaga").replace(/\bno data\b/g, "sin datos");
-  }
+  if (locale === "pt-BR") result = postProcessPtBR(result);
+  else if (locale === "es") result = postProcessEs(result);
   return result;
 }
+
 
 function shouldIgnore(node: Node): boolean {
   return node.parentElement?.closest("[data-i18n-ignore]") !== null;
 }
 
+/**
+ * Translate a single Text node in-place.
+ *
+ * On first encounter the current value is stored as the source original.
+ * Because `t()` now returns the English key unchanged, React always renders
+ * canonical source text before `applyLocale` or the observer translate it.
+ * Subsequent calls always translate from the stored original, never from
+ * a previously-translated value.
+ */
 function translateTextNode(node: Text): void {
   if (shouldIgnore(node)) return;
   const current = node.nodeValue ?? "";
@@ -78,15 +91,34 @@ function translateAttributes(root: ParentNode): void {
   }
 }
 
+/**
+ * Collect every Text node below `root` in document order.
+ *
+ * Uses `querySelectorAll("*")` + `childNodes` instead of a TreeWalker so the
+ * traversal also works in DOM implementations where a TreeWalker rooted at
+ * `document.body`/`document` misbehaves (e.g. happy-dom test environment).
+ * The `data-i18n-ignore` filtering is done per-node in translateTextNode.
+ */
+function collectTextNodes(root: Node): Text[] {
+  if (root.nodeType === Node.TEXT_NODE) return [root as Text];
+  if (!(root instanceof Element || root instanceof DocumentFragment || root instanceof Document)) return [];
+  const elements: Element[] = [];
+  if (root instanceof Element) elements.push(root);
+  elements.push(...Array.from(root.querySelectorAll("*")));
+  const nodes: Text[] = [];
+  for (const element of elements) {
+    for (const child of element.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) nodes.push(child as Text);
+    }
+  }
+  return nodes;
+}
+
 function translateRoot(root: Node): void {
   if (root.nodeType === Node.TEXT_NODE) { translateTextNode(root as Text); return; }
   if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
   if (root instanceof Element && root.hasAttribute("data-i18n-ignore")) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes: Text[] = [];
-  let node: Node | null;
-  while ((node = walker.nextNode())) nodes.push(node as Text);
-  for (const textNode of nodes) translateTextNode(textNode);
+  for (const textNode of collectTextNodes(root)) translateTextNode(textNode);
   if (root instanceof Element || root instanceof DocumentFragment) translateAttributes(root);
 }
 
@@ -121,10 +153,19 @@ export function formatHour(hour: string): string {
   return d.toLocaleString(activeLocale === "pt-BR" ? "pt-BR" : activeLocale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function startObserver(): () => void {
+/**
+ * Initialize the MutationObserver and apply the current locale to the DOM.
+ * Returns a cleanup function that disconnects the observer and cancels pending
+ * work. Exported for testing — do not rely on this in application code outside
+ * I18nProvider.
+ */
+export function startObserver(): () => void {
   if (typeof document === "undefined" || !document.body) return () => undefined;
   observer?.disconnect();
   observer = new MutationObserver((mutations) => {
+// Register unknown text as source or detect real React updates.
+        // The equality guard prevents our own translations from being mistaken
+        // for new source text (the bug that was fixed in this module).
     if (applying) return;
     for (const mutation of mutations) {
       if (mutation.type === "characterData") {
@@ -158,8 +199,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, next);
     applyLocale(next);
   }, []);
-  useEffect(() => { activeLocale = locale; return startObserver(); }, []);
-  const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t: (value: string) => translateValue(value, locale) }), [locale, setLocale]);
+  useLayoutEffect(() => { activeLocale = locale; return startObserver(); }, []);
+  const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t: (value: string) => value }), [locale, setLocale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

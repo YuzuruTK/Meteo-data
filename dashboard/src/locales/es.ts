@@ -69,3 +69,18 @@ export const es = {
   "You'll get a notification when rain starts at a station. No account needed.": "Recibirás una notificación cuando empiece a llover en una estación. No necesitas una cuenta.",
   "Language": "Idioma",
 } as const;
+
+/**
+ * Locale-specific post-processing rules for es.
+ *
+ * Handles patterns that are difficult to express as simple dictionary entries
+ * (dynamic numbers, inline fragments, word-level substitutions).
+ */
+export function postProcessEs(s: string): string {
+  return s
+    .replace(/(\d+)\s+hours\b/g, "$1 horas")
+    .replace(/\bstations\b/g, "estaciones")
+    .replace(/\bstation\b/g, "estación")
+    .replace(/\bgust\b/g, "ráfaga")
+    .replace(/\bno data\b/g, "sin datos");
+}

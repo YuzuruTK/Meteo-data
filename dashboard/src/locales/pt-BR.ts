@@ -69,3 +69,18 @@ export const ptBR = {
   "You'll get a notification when rain starts at a station. No account needed.": "Você receberá uma notificação quando começar a chover em uma estação. Não é necessário ter uma conta.",
   "Language": "Idioma",
 } as const;
+
+/**
+ * Locale-specific post-processing rules for pt-BR.
+ *
+ * Handles patterns that are difficult to express as simple dictionary entries
+ * (dynamic numbers, inline fragments, word-level substitutions).
+ */
+export function postProcessPtBR(s: string): string {
+  return s
+    .replace(/(\d+)\s+hours\b/g, "$1 horas")
+    .replace(/\bstations\b/g, "estações")
+    .replace(/\bstation\b/g, "estação")
+    .replace(/\bgust\b/g, "rajada")
+    .replace(/\bno data\b/g, "sem dados");
+}
