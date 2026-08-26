@@ -72,9 +72,11 @@ const translations: Record<string, string> = {
   "You'll get a notification when rain starts at a station. No account needed.": "Você receberá uma notificação quando começar a chover em uma estação. Não é necessário ter uma conta.",
 };
 
+const translationEntries = Object.entries(translations).sort(([a], [b]) => b.length - a.length);
+
 function translateText(text: string): string {
   let result = text;
-  for (const [source, target] of Object.entries(translations)) {
+  for (const [source, target] of translationEntries) {
     result = result.replaceAll(source, target);
   }
   result = result.replace(/(\d+)\s+hours/g, "$1 horas");
