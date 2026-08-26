@@ -27,7 +27,7 @@ export default function LanguageSelector() {
         fontSize: "14px",
       }}
     >
-      <span className="sr-only">{t("Language")}</span>
+      <span>{t("Language")}:</span>
       <select
         aria-label={t("Language")}
         value={locale}
