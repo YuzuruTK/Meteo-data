@@ -82,11 +82,27 @@ function translateText(text: string): string {
   return result;
 }
 
+function translateAttributes(root: ParentNode): void {
+  for (const element of root.querySelectorAll<HTMLElement>("[title], [aria-label]")) {
+    for (const attribute of ["title", "aria-label"] as const) {
+      const value = element.getAttribute(attribute);
+      if (value) element.setAttribute(attribute, translateText(value));
+    }
+  }
+}
+
 export function installPortugueseTranslation(): () => void {
   if (typeof document === "undefined") return () => undefined;
   document.documentElement.lang = "pt-BR";
+  document.title = translations["Meteo Data Dashboard"];
 
   const translate = (root: Node) => {
+    if (root.nodeType === Node.TEXT_NODE) {
+      const textNode = root as Text;
+      const translated = translateText(textNode.nodeValue ?? "");
+      if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
+      return;
+    }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes: Text[] = [];
     let node: Node | null;
@@ -95,17 +111,17 @@ export function installPortugueseTranslation(): () => void {
       const translated = translateText(textNode.nodeValue ?? "");
       if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
     }
+    if (root instanceof Element || root instanceof Document) translateAttributes(root);
   };
 
   translate(document.body);
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (mutation.type === "characterData") {
-        const textNode = mutation.target as Text;
-        const translated = translateText(textNode.nodeValue ?? "");
-        if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
+        translate(mutation.target);
       } else {
         for (const node of mutation.addedNodes) translate(node);
+        if (mutation.target instanceof Element) translateAttributes(mutation.target);
       }
     }
   });
