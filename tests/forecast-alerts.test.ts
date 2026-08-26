@@ -17,26 +17,31 @@ type State = { event_key: string; event_time: string; fingerprint: string };
 
 class FakeD1 {
   state = new Map<string, State>();
-  subscriptions = [{ endpoint: "https://push.example/1", p256dh: "A", auth: "B" }];
+  subscriptions = [{ endpoint: "https://push.example/1", p256dh: "A", auth: "B", created_at: "2026-01-01" }];
 
   prepare(sql: string) {
+    const execute = (args: unknown[]) => ({
+      first: async <T>() => {
+        if (sql.includes("weather_forecast_alert_state")) {
+          return (this.state.get(String(args[0])) as T) ?? null;
+        }
+        return null as T;
+      },
+      run: async () => {
+        if (sql.includes("weather_forecast_alert_state")) {
+          const [type, eventKey, eventTime, fingerprint] = args as string[];
+          this.state.set(type, { event_key: eventKey, event_time: eventTime, fingerprint });
+        }
+        return { meta: { changes: 1 } };
+      },
+      all: async () => ({ results: this.subscriptions }),
+    });
+
     return {
-      bind: (...args: unknown[]) => ({
-        first: async <T>() => {
-          if (sql.includes("weather_forecast_alert_state")) {
-            return (this.state.get(String(args[0])) as T) ?? null;
-          }
-          return null as T;
-        },
-        run: async () => {
-          if (sql.includes("weather_forecast_alert_state")) {
-            const [type, eventKey, eventTime, fingerprint] = args as string[];
-            this.state.set(type, { event_key: eventKey, event_time: eventTime, fingerprint });
-          }
-          return { meta: { changes: 1 } };
-        },
-        all: async () => ({ results: this.subscriptions }),
-      }),
+      bind: (...args: unknown[]) => execute(args),
+      first: <T>() => execute([]).first<T>(),
+      run: () => execute([]).run(),
+      all: <T>() => execute([]).all<T>(),
     };
   }
 }
@@ -88,14 +93,7 @@ describe("forecast alert evaluation", () => {
       FORECAST_RAIN_START_SHIFT_MINUTES: "30",
       FORECAST_ALERT_HORIZON_HOURS: "12",
     });
-    expect(config).toEqual({
-      lowTemperatureC: 2,
-      temperatureVariationC: 7,
-      consecutiveTemperatureChangeC: 4,
-      rainProbabilityPercent: 80,
-      rainStartShiftMinutes: 30,
-      horizonHours: 12,
-    });
+    expect(config).toEqual({ lowTemperatureC: 2, temperatureVariationC: 7, consecutiveTemperatureChangeC: 4, rainProbabilityPercent: 80, rainStartShiftMinutes: 30, horizonHours: 12 });
   });
 });
 
