@@ -39,6 +39,7 @@ const translations: Record<string, string> = {
   "Falling": "Descendo",
   "Stable": "Estável",
   "Latest hourly averages": "Médias horárias mais recentes",
+  "Average of latest readings": "Média das leituras mais recentes",
   "Hour": "Horário",
   "station": "estação",
   "stations": "estações",
@@ -73,60 +74,83 @@ const translations: Record<string, string> = {
 };
 
 const translationEntries = Object.entries(translations).sort(([a], [b]) => b.length - a.length);
+const sourcePattern = new RegExp(translationEntries.map(([source]) => source.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")).join("|"));
 
 function translateText(text: string): string {
+  if (!sourcePattern.test(text) && !/\b\d+\s+hours\b/.test(text)) return text;
   let result = text;
-  for (const [source, target] of translationEntries) {
-    result = result.replaceAll(source, target);
+  for (const [source, target] of translationEntries) result = result.replaceAll(source, target);
+  return result.replace(/(\d+)\s+hours/g, "$1 horas");
+}
+
+function translateTextNodes(root: Node): void {
+  if (root.nodeType === Node.TEXT_NODE) {
+    const textNode = root as Text;
+    const translated = translateText(textNode.nodeValue ?? "");
+    if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
+    return;
   }
-  result = result.replace(/(\d+)\s+hours/g, "$1 horas");
-  result = result.replace(/Average of latest readings/g, "Média das leituras mais recentes");
-  return result;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) nodes.push(node as Text);
+  for (const textNode of nodes) {
+    const translated = translateText(textNode.nodeValue ?? "");
+    if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
+  }
 }
 
 function translateAttributes(root: ParentNode): void {
   for (const element of root.querySelectorAll<HTMLElement>("[title], [aria-label]")) {
     for (const attribute of ["title", "aria-label"] as const) {
       const value = element.getAttribute(attribute);
-      if (value) element.setAttribute(attribute, translateText(value));
+      if (value) {
+        const translated = translateText(value);
+        if (translated !== value) element.setAttribute(attribute, translated);
+      }
     }
   }
 }
 
 export function installPortugueseTranslation(): () => void {
-  if (typeof document === "undefined") return () => undefined;
+  if (typeof document === "undefined" || !document.body) return () => undefined;
   document.documentElement.lang = "pt-BR";
   document.title = translations["Meteo Data Dashboard"];
 
-  const translate = (root: Node) => {
-    if (root.nodeType === Node.TEXT_NODE) {
-      const textNode = root as Text;
-      const translated = translateText(textNode.nodeValue ?? "");
-      if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
-      return;
+  translateTextNodes(document.body);
+  translateAttributes(document.body);
+
+  const pending = new Set<Node>();
+  let frame: number | null = null;
+  const flush = () => {
+    frame = null;
+    for (const node of pending) {
+      if (node.isConnected) {
+        translateTextNodes(node);
+        if (node instanceof Element) translateAttributes(node);
+      }
     }
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const nodes: Text[] = [];
-    let node: Node | null;
-    while ((node = walker.nextNode())) nodes.push(node as Text);
-    for (const textNode of nodes) {
-      const translated = translateText(textNode.nodeValue ?? "");
-      if (translated !== textNode.nodeValue) textNode.nodeValue = translated;
-    }
-    if (root instanceof Element || root instanceof Document) translateAttributes(root);
+    pending.clear();
+  };
+  const schedule = (node: Node) => {
+    pending.add(node);
+    if (frame === null) frame = window.requestAnimationFrame(flush);
   };
 
-  translate(document.body);
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      if (mutation.type === "characterData") {
-        translate(mutation.target);
-      } else {
-        for (const node of mutation.addedNodes) translate(node);
-        if (mutation.target instanceof Element) translateAttributes(mutation.target);
+      if (mutation.type === "characterData") schedule(mutation.target);
+      else {
+        for (const node of mutation.addedNodes) schedule(node);
+        if (mutation.target instanceof Element) schedule(mutation.target);
       }
     }
   });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-  return () => observer.disconnect();
+
+  return () => {
+    observer.disconnect();
+    if (frame !== null) window.cancelAnimationFrame(frame);
+    pending.clear();
+  };
 }
