@@ -49,6 +49,7 @@ describe("detectLocale", () => {
     setNavigatorLanguage("fr-FR");
     expect(detectLocale()).toBe("pt-BR");
   });
+});
 describe("translateValue", () => {
   it("translates into pt-BR", () => {
     expect(translateValue("Temperature", "pt-BR")).toBe("Temperatura");
@@ -205,4 +206,4 @@ describe("MutationObserver integration", () => {
     expect(probeText("probe")).toBe("Temperature");
   });
 });
-});
+
