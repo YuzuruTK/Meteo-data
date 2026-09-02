@@ -104,7 +104,10 @@ export async function runCollection(
 
   // Maintain historical rollups (hourly + daily). Best-effort: a rollup
   // failure must not fail the collection run.
-  if (requestsSucceeded > 0) {
+  // Emergency D1 read conservation (docs/emergency-d1-mode.md): the rollup
+  // is the single largest read consumer (~17k rows/cycle). DISABLE_ROLLUPS
+  // skips it entirely; absent/unset keeps default behavior unchanged.
+  if (requestsSucceeded > 0 && env.DISABLE_ROLLUPS !== "true") {
     try {
       await rollupObservations(env.DB);
     } catch (rollupErr) {
