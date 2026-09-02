@@ -20,6 +20,8 @@ interface Prepared {
 
 class FakeD1 {
   observations: Row[] = [];
+  hourly: Row[] = [];
+  latest: Row[] = [];
   locations: Row[] = [];
   summary: Row[] = [];
 
@@ -36,86 +38,60 @@ class FakeD1 {
     const self = this;
     return {
       async all(): Promise<{ results: Row[] }> {
-        const observed = sql.includes("weather_observations");
+        // Aggregate query: reads the materialized hourly rollup
+        // (getHourlyAverages reads weather_observations_hourly).
+        if (sql.includes("weather_observations_hourly")) {
+          const stationFilter = bindings[0] as string | undefined;
+          const rows: Row[] = self.hourly
+            .filter((h) => !stationFilter || h.location_id === stationFilter)
+            .map((h) => {
+              const loc = self.locations.find((l) => l.id === h.location_id);
+              const count = self.num(h.observation_count) ?? 0;
+              const total = self.num(h.precipitation_total_sum);
+              return {
+                station_id: h.location_id,
+                station_name: (loc?.name as string) ?? "",
+                hour: h.hour,
+                temperature_avg: self.num(h.temperature_avg),
+                solar_radiation_avg: self.num(h.solar_radiation_avg),
+                humidity_avg: self.num(h.humidity_avg),
+                pressure_avg: self.num(h.pressure_avg),
+                wind_speed_avg: self.num(h.wind_speed_avg),
+                wind_direction_avg: self.num(h.wind_direction_avg),
+                wind_gust_avg: self.num(h.wind_gust_avg),
+                precipitation_rate_avg: self.num(h.precipitation_rate_avg),
+                precipitation_total_avg:
+                  count > 0 && total !== null ? total / count : null,
+                uv_index_avg: self.num(h.uv_index_avg),
+                cloud_cover_avg: self.num(h.cloud_cover_avg),
+                visibility_avg: self.num(h.visibility_avg),
+              };
+            });
+          rows.sort((a, b) => (a.hour as string).localeCompare(b.hour as string));
+          return { results: rows };
+        }
 
-        // Stations query: latest-observation-per-station with a stale flag.
-        if (observed && sql.includes("MAX(o.observed_at)")) {
+        // Stations query: latest-observation-per-station with a stale flag,
+        // read from the materialized latest-state table (getStations reads
+        // latest_weather_observations).
+        if (sql.includes("latest_weather_observations")) {
           const results: Row[] = [];
-          const seen = new Set<string>();
-          for (const o of self.observations) {
-            const loc = self.locations.find((l) => l.id === o.location_id);
-            if (!loc || seen.has(loc.id as string)) continue;
-            seen.add(loc.id as string);
-            const lastObservedAt = self.latestObservedAt(o.location_id as string);
+          for (const l of self.latest) {
+            const loc = self.locations.find((x) => x.id === l.location_id);
+            if (!loc) continue;
+            const lastObservedAt = l.observed_at as string;
             results.push({
               id: loc.id,
               source_id: loc.source_id,
               name: loc.name,
               last_observed_at: lastObservedAt,
-              stale: lastObservedAt !== null && self.isStale(lastObservedAt) ? 1 : 0,
+              stale: self.isStale(lastObservedAt) ? 1 : 0,
             });
           }
           return { results };
         }
 
-        if (observed && sql.includes("weather_locations") && sql.includes("GROUP BY")) {
-          // Aggregate query: group by location + hour, optionally filtered by station.
-          const stationFilter = bindings[0] as string | undefined;
-          const groups = new Map<string, Row[]>();
-          for (const o of self.observations) {
-            if (stationFilter && o.location_id !== stationFilter) continue;
-            const key = `${o.location_id}|${self.hourOf(o.observed_at as string)}`;
-            const bucket = groups.get(key) ?? [];
-            bucket.push(o);
-            groups.set(key, bucket);
-          }
-          const rows: HourlyAverageRow[] = Array.from(groups.entries()).map(([key, bucket]) => {
-            const [locId, hour] = key.split("|") as [string, string];
-            const loc = self.locations.find((l) => l.id === locId);
-            // Two-value average of each numeric column (test uses 1 or 2 per bucket).
-            const avgOf = (field: string) =>
-              bucket.length === 2
-                ? self.avg2(bucket[0]?.[field], bucket[1]?.[field])
-                : self.num(bucket[0]?.[field]);
-            return {
-              station_id: locId,
-              station_name: (loc?.name as string) ?? "",
-              hour,
-              temperature_avg: avgOf("temperature"),
-              solar_radiation_avg: avgOf("solar_radiation"),
-              humidity_avg: avgOf("humidity"),
-              pressure_avg: avgOf("pressure"),
-              wind_speed_avg: avgOf("wind_speed"),
-              wind_direction_avg: avgOf("wind_direction"),
-              wind_gust_avg: avgOf("wind_gust"),
-              precipitation_rate_avg: avgOf("precipitation_rate"),
-              precipitation_total_avg: avgOf("precipitation_total"),
-              uv_index_avg: avgOf("uv_index"),
-              cloud_cover_avg: avgOf("cloud_cover"),
-              visibility_avg: avgOf("visibility"),
-            };
-          });
-          rows.sort((a, b) => a.hour.localeCompare(b.hour));
-          return { results: rows as unknown as Row[] };
-        }
-
-        if (observed && sql.includes("DISTINCT")) {
-          const seen = new Set<string>();
-          const results: StationRow[] = [];
-          for (const o of self.observations) {
-            const loc = self.locations.find((l) => l.id === o.location_id);
-            if (!loc || seen.has(loc.id as string)) continue;
-            seen.add(loc.id as string);
-            results.push({
-              id: loc.id as string,
-              source_id: loc.source_id as string,
-              name: loc.name as string,
-            } as StationRow);
-          }
-          return { results: results as unknown as Row[] };
-        }
-
-        if (sql.includes("FROM weather_locations") && !observed) {
+        if (sql.includes("FROM weather_locations")) {
           return { results: self.locations as Row[] };
         }
 
@@ -134,52 +110,34 @@ class FakeD1 {
     return Number.isNaN(n) ? null : n;
   }
 
-  private avg2(a: unknown, b: unknown): number | null {
-    const na = this.num(a);
-    const nb = this.num(b);
-    if (na === null) return nb;
-    if (nb === null) return na;
-    return (na + nb) / 2;
-  }
-
-  private hourOf(ts: string): string {
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:00`;
-  }
-
-  private latestObservedAt(locationId: string): string | null {
-    let latest: string | null = null;
-    for (const o of this.observations) {
-      if (o.location_id !== locationId) continue;
-      const ts = o.observed_at as string;
-      if (latest === null || ts > latest) latest = ts;
-    }
-    return latest;
-  }
-
   isStale(ts: string): boolean {
     const d = new Date(ts).getTime();
     return new Date().getTime() - d > 15 * 60 * 1000;
   }
 }
 
-describe("dashboard aggregation", () => {
+describe("dashboard aggregation (rollup read path)", () => {
   it("groups observations by station and hour, averaging each variable", async () => {
     const db = new FakeD1();
     db.locations.push({ id: "loc-1", source_id: "src", name: "Ijuí A" });
-    db.observations.push(
+    // Pre-aggregated hourly rollup rows, exactly what
+    // rollupObservations() would persist for these raw observations.
+    db.hourly.push(
       {
-        location_id: "loc-1", observed_at: "2025-01-01T10:00:00Z",
-        temperature: 20, solar_radiation: 100, humidity: 60,
+        location_id: "loc-1", hour: "2025-01-01 10:00",
+        temperature_avg: 21, solar_radiation_avg: 110, humidity_avg: 57.5,
+        pressure_avg: null, wind_speed_avg: null, wind_direction_avg: null,
+        wind_gust_avg: null, precipitation_rate_avg: null,
+        precipitation_total_sum: 2, observation_count: 2,
+        uv_index_avg: null, cloud_cover_avg: null, visibility_avg: null,
       },
       {
-        location_id: "loc-1", observed_at: "2025-01-01T10:30:00Z",
-        temperature: 22, solar_radiation: 120, humidity: 55,
-      },
-      {
-        location_id: "loc-1", observed_at: "2025-01-01T11:00:00Z",
-        temperature: 24, solar_radiation: 150, humidity: 50,
+        location_id: "loc-1", hour: "2025-01-01 11:00",
+        temperature_avg: 24, solar_radiation_avg: 150, humidity_avg: 50,
+        pressure_avg: null, wind_speed_avg: null, wind_direction_avg: null,
+        wind_gust_avg: null, precipitation_rate_avg: null,
+        precipitation_total_sum: null, observation_count: 1,
+        uv_index_avg: null, cloud_cover_avg: null, visibility_avg: null,
       },
     );
 
@@ -191,6 +149,8 @@ describe("dashboard aggregation", () => {
     expect(rows[0]?.temperature_avg).toBe(21);
     expect(rows[0]?.solar_radiation_avg).toBe(110);
     expect(rows[0]?.humidity_avg).toBe(57.5);
+    // precipitation_total_avg derived as sum / count.
+    expect(rows[0]?.precipitation_total_avg).toBe(1);
     expect(rows[1]?.temperature_avg).toBe(24);
   });
 
@@ -200,9 +160,15 @@ describe("dashboard aggregation", () => {
       { id: "loc-1", source_id: "src", name: "A" },
       { id: "loc-2", source_id: "src", name: "B" },
     );
-    db.observations.push(
-      { location_id: "loc-1", observed_at: "2025-01-01T10:00:00Z", temperature: 20 },
-      { location_id: "loc-2", observed_at: "2025-01-01T10:00:00Z", temperature: 30 },
+    db.hourly.push(
+      {
+        location_id: "loc-1", hour: "2025-01-01 10:00",
+        temperature_avg: 20, observation_count: 1,
+      },
+      {
+        location_id: "loc-2", hour: "2025-01-01 10:00",
+        temperature_avg: 30, observation_count: 1,
+      },
     );
 
     const rows = await getHourlyAverages(db as unknown as D1Database, { hours: 24, station: "loc-2" });
@@ -210,13 +176,13 @@ describe("dashboard aggregation", () => {
     expect(rows[0]?.station_id).toBe("loc-2");
   });
 
-  it("lists stations from observations, falling back to all locations", async () => {
+  it("lists stations from latest state, falling back to all locations", async () => {
     const db = new FakeD1();
     db.locations.push(
       { id: "loc-1", source_id: "src", name: "A" },
       { id: "loc-2", source_id: "src", name: "B" },
     );
-    db.observations.push({ location_id: "loc-1", observed_at: "2025-01-01T10:00:00Z", temperature: 20 });
+    db.latest.push({ location_id: "loc-1", observed_at: "2025-01-01T10:00:00Z" });
 
     const stations = await getStations(db as unknown as D1Database, { hours: 24 });
     expect(stations).toHaveLength(1);
@@ -231,9 +197,9 @@ describe("dashboard aggregation", () => {
     );
     // Set stale directly on the mock data so the test does not depend on
     // wall-clock timing.
-    db.observations.push(
-      { location_id: "loc-1", observed_at: "2025-06-01T12:00:00Z", temperature: 20 },
-      { location_id: "loc-2", observed_at: "2020-01-01T00:00:00Z", temperature: 30 },
+    db.latest.push(
+      { location_id: "loc-1", observed_at: "2025-06-01T12:00:00Z" },
+      { location_id: "loc-2", observed_at: "2020-01-01T00:00:00Z" },
     );
     // Override isStale for this test: loc-1 is fresh, loc-2 is stale.
     db.isStale = (ts: string) => ts.startsWith("2020");
@@ -276,8 +242,9 @@ describe("dashboard API", () => {
   it("returns aggregate JSON for /api/observations/aggregate", async () => {
     const db = new FakeD1();
     db.locations.push({ id: "loc-1", source_id: "src", name: "Ijuí A" });
-    db.observations.push({
-      location_id: "loc-1", observed_at: "2025-01-01T10:00:00Z", temperature: 20,
+    db.hourly.push({
+      location_id: "loc-1", hour: "2025-01-01 10:00",
+      temperature_avg: 20, observation_count: 1,
     });
 
     const req = new Request("https://example.workers.dev/api/observations/aggregate?hours=24", {
