@@ -154,7 +154,10 @@ export async function rollupObservations(
        )
        SELECT ${hourlySelectColumns}
        FROM weather_observations
-       WHERE observed_at >= datetime('now', '-${hours} hours')
+       -- datetime() normalizes the stored ISO-8601 UTC string before
+       -- comparison; a raw lexicographic ISO-vs-datetime() comparison is
+       -- wrong on the same calendar date ('T' > ' ' in ASCII).
+       WHERE datetime(observed_at) >= datetime('now', '-${hours} hours')
        GROUP BY location_id, hour
        ON CONFLICT(location_id, hour) DO UPDATE SET
          ${hourlyUpsertSet},

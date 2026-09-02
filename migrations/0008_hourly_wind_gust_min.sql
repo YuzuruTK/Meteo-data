@@ -1,0 +1,19 @@
+-- 0008_hourly_wind_gust_min
+-- Bug fix discovered by the real-SQLite integration tests
+-- (tests/timestamp-comparison.test.ts):
+--
+-- rollupObservations() (src/db/rollups.ts) inserts `wind_gust_min` into
+-- weather_observations_hourly, but that column was never part of the table
+-- definition in 0005_observation_rollups.sql (only wind_gust_avg and
+-- wind_gust_max exist). Every rollup execution has therefore failed with
+-- "table weather_observations_hourly has no column named wind_gust_min"
+-- since the rollup feature shipped. The failure was silent in production
+-- because the collector wraps rollupObservations() in a best-effort
+-- try/catch -- meaning NO hourly/daily rollups have ever been persisted.
+--
+-- Fix: add the missing column. This preserves the query's intent (track
+-- minimum wind gust per hour, as declared by HOURLY_MIN_COLUMNS) instead of
+-- weakening the aggregation. Existing rows get NULL for the new column,
+-- which matches the behavior of every other nullable metric column; the
+-- next successful rollup run repopulates the recent window.
+ALTER TABLE weather_observations_hourly ADD COLUMN wind_gust_min REAL;

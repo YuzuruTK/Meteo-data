@@ -80,7 +80,10 @@ export async function getHourlyAverages(
   );
 
   const where: string[] = [
-    `o.observed_at >= datetime('now', '-${hoursClamped} hours')`,
+    // datetime() normalizes the stored ISO-8601 UTC string before comparison;
+    // a raw lexicographic ISO-vs-datetime() comparison is wrong on the same
+    // calendar date ('T' > ' ' in ASCII).
+    `datetime(o.observed_at) >= datetime('now', '-${hoursClamped} hours')`,
   ];
   const bindings: (string | number)[] = [];
 
@@ -135,12 +138,15 @@ export async function getStations(
          wl.name AS name,
          MAX(o.observed_at) AS last_observed_at,
          CASE
-           WHEN MAX(o.observed_at) < datetime('now', '-${staleMinutes} minutes') THEN 1
+           -- datetime() normalizes the stored ISO-8601 UTC string before
+           -- comparison; a raw lexicographic ISO-vs-datetime() comparison
+           -- would never flag a same-day observation as stale.
+           WHEN datetime(MAX(o.observed_at)) < datetime('now', '-${staleMinutes} minutes') THEN 1
            ELSE 0
          END AS stale
        FROM weather_observations o
        JOIN weather_locations wl ON wl.id = o.location_id
-       WHERE o.observed_at >= datetime('now', '-${hoursClamped} hours')
+       WHERE datetime(o.observed_at) >= datetime('now', '-${hoursClamped} hours')
        GROUP BY wl.id
        ORDER BY wl.name ASC, wl.id ASC`,
     )
