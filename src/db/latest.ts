@@ -71,7 +71,13 @@ export async function loadLatestStations(
        FROM latest_weather_observations l
        JOIN weather_locations wl
          ON wl.id = l.location_id
-       WHERE l.observed_at >= datetime('now', '-${STALE_MINUTES} minutes')
+       -- datetime() normalizes the stored ISO-8601 UTC string
+       -- (YYYY-MM-DDTHH:MM:SS.sssZ) into SQLite's "YYYY-MM-DD HH:MM:SS"
+       -- before comparison. Comparing the raw ISO string against
+       -- datetime('now', ...) lexicographically is WRONG: on the same
+       -- calendar date 'T' (0x54) > ' ' (0x20), so every same-day timestamp
+       -- would pass the freshness filter regardless of its actual time.
+       WHERE datetime(l.observed_at) >= datetime('now', '-${STALE_MINUTES} minutes')
        ORDER BY wl.name ASC`,
     )
     .all<LatestStation>();

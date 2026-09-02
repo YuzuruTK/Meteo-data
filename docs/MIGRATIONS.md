@@ -14,6 +14,8 @@ Migration `0002_push_subscriptions.sql` adds two tables for anonymous rain-alert
 
 Migration `0007_latest_weather_observations.sql` adds `latest_weather_observations`, a materialized latest-state table (exactly one row per station) maintained by the collector after each successful observation insert. The rain alert pipeline reads from this table instead of scanning the historical `weather_observations` table, which previously caused a full-table scan (~15k+ rows read) on every 5-minute alert evaluation.
 
+Migration `0008_hourly_wind_gust_min.sql` adds the missing `wind_gust_min` column to `weather_observations_hourly`. The rollup query has always inserted this column, but it was never part of the table definition in `0005_observation_rollups.sql`, so every rollup execution failed silently (best-effort catch in the collector) and no hourly/daily rollups were ever persisted. This was discovered by the real-SQLite integration tests in `tests/timestamp-comparison.test.ts`.
+
 ## Before you begin
 
 1. Create the D1 database (once) if it doesn't already exist:

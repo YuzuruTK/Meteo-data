@@ -195,6 +195,7 @@ describe("loadLatestStations", () => {
 
     expect(db.sawSelect).toBe(true);
     expect(db.lastSql).toContain("latest_weather_observations");
+    expect(db.lastSql).toContain("datetime(l.observed_at)");
     expect(db.lastSql).not.toContain("weather_observations o");
     expect(db.lastSql).not.toContain("MAX(");
     expect(stations).toEqual([
