@@ -159,9 +159,9 @@ d("timestamp comparison against real SQLite", () => {
       ('st-30min', 'src', 'e2', 'Thirty', datetime('now'), datetime('now')),
       ('st-boundary', 'src', 'e3', 'Boundary', datetime('now'), datetime('now'))`);
 
-    await insertObservation(db, makeObs("st-fresh", iso(-2)));
-    await insertObservation(db, makeObs("st-30min", iso(-30)));
-    await insertObservation(db, makeObs("st-boundary", `${cutoffDatePart}T00:00:00.000Z`));
+    await upsertLatestObservation(db, makeObs("st-fresh", iso(-2)));
+    await upsertLatestObservation(db, makeObs("st-30min", iso(-30)));
+    await upsertLatestObservation(db, makeObs("st-boundary", `${cutoffDatePart}T00:00:00.000Z`));
 
     const stations = await getStations(db, { hours: 24, staleMinutes: 15 });
     const byId = new Map(stations.map((s) => [s.id, s]));
@@ -181,19 +181,27 @@ d("timestamp comparison against real SQLite", () => {
 
     const now = Date.now();
     const iso = (minOffset: number) => new Date(now + minOffset * 60_000).toISOString();
-    const cutoffDatePart = new Date(now - 60 * 60_000).toISOString().slice(0, 10);
 
     raw.exec(`INSERT INTO weather_locations (id, source_id, external_id, name, created_at, updated_at) VALUES
       ('st-1h', 'src', 'e1', 'OneHour', datetime('now'), datetime('now')),
       ('st-old', 'src', 'e2', 'Older', datetime('now'), datetime('now'))`);
 
+    // st-1h has a bucket inside the 1-hour window (the current hour).
     await insertObservation(db, makeObs("st-1h", iso(-30)));
-    // Same calendar date as the 1-hour cutoff, but 3 hours old: the naive
-    // TEXT comparison would include it in the window.
-    await insertObservation(db, makeObs("st-old", `${cutoffDatePart}T00:00:00.000Z`));
+    await rollupObservations(db);
+    // st-old's bucket is 3 hours old — same calendar date as the cutoff, but
+    // the hour label comparison must exclude it (naive date-only TEXT
+    // comparison would include it).
+    await insertObservation(db, makeObs("st-old", iso(-3 * 60)));
+    await rollupObservations(db);
 
     const rows = await getHourlyAverages(db, { hours: 1 });
     expect(rows.map((r) => r.station_id)).toEqual(["st-1h"]);
+    // Sanity: the old bucket really exists in the rollup, just outside the window.
+    const allHourly = raw
+      .prepare("SELECT DISTINCT location_id FROM weather_observations_hourly")
+      .all() as Array<{ location_id: string }>;
+    expect(allHourly.map((r) => r.location_id)).toContain("st-old");
   });
 
   it("bounds the hourly rollup window exactly in rollupObservations", async () => {
