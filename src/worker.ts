@@ -7,6 +7,7 @@ import { handlePushApi } from "./push/api";
 import { runRainAlerts, buildPushSendOptions } from "./push/alerts";
 import { getForecastAlertConfig, runForecastAlerts } from "./push/forecast";
 import { sendPushNotifications } from "./push/send";
+import { loadLatestStations } from "./db/latest";
 import type { Env } from "./db/types";
 
 /**
@@ -110,31 +111,6 @@ async function maybeRunWeatherAlerts(env: Env): Promise<void> {
     // scheduled collection cycle.
     console.error("[worker] forecast alerts skipped", error);
   }
-}
-
-const STALE_MINUTES = 15;
-
-async function loadLatestStations(
-  db: Env["DB"],
-): Promise<Array<{ stationId: string; stationName: string; rainRateMmH: number | null }>> {
-  const res = await db
-    .prepare(
-      `SELECT
-         wl.id AS stationId,
-         wl.name AS stationName,
-         o.precipitation_rate AS rainRateMmH
-       FROM weather_observations o
-       JOIN weather_locations wl ON wl.id = o.location_id
-       WHERE o.observed_at = (
-         SELECT MAX(o2.observed_at)
-         FROM weather_observations o2
-         WHERE o2.location_id = o.location_id
-       )
-         AND o.observed_at >= datetime('now', '-${STALE_MINUTES} minutes')
-       ORDER BY wl.name ASC`,
-    )
-    .all<{ stationId: string; stationName: string; rainRateMmH: number | null }>();
-  return res.results ?? [];
 }
 
 async function handlePushTest(request: Request, env: Env): Promise<Response> {

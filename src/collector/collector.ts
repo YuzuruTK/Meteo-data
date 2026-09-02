@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { upsertLocation } from "../db/locations";
 import { insertObservation } from "../db/observations";
+import { upsertLatestObservation } from "../db/latest";
 import { createRun, finishRun, logRequest } from "../db/runs";
 import { updateDashboardSummary } from "../dashboard/summary";
 import { rollupObservations } from "../db/rollups";
@@ -274,6 +275,18 @@ async function collectOne(
       // collection run.
       console.warn(
         `[collector] ${source.id} / ${location.id}: dashboard summary update failed: ${errMessage(summaryErr)}`,
+      );
+    }
+
+    // Maintain the materialized latest-state table used by the rain alert
+    // pipeline, so alert evaluation never scans the historical table.
+    try {
+      await upsertLatestObservation(env.DB, observation);
+    } catch (latestErr) {
+      // Latest-state update is best-effort; a failure here must not fail
+      // the collection run. The next successful cycle will catch up.
+      console.warn(
+        `[collector] ${source.id} / ${location.id}: latest observation update failed: ${errMessage(latestErr)}`,
       );
     }
 

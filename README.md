@@ -80,6 +80,7 @@ src/
     types.ts                         Env bindings
     locations.ts                     weather_locations persistence
     observations.ts                  weather_observations persistence
+    latest.ts                        latest_weather_observations persistence (rain alerts)
     runs.ts                          collector_runs / collector_requests persistence
   push/
     api.ts                           subscribe/unsubscribe/public-key handlers

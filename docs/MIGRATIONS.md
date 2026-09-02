@@ -12,6 +12,8 @@ Migration `0002_push_subscriptions.sql` adds two tables for anonymous rain-alert
 - `push_subscriptions` — stores each browser's push endpoint + keys.
 - `weather_alert_state` — tracks the last rain state per station to dedupe alerts.
 
+Migration `0007_latest_weather_observations.sql` adds `latest_weather_observations`, a materialized latest-state table (exactly one row per station) maintained by the collector after each successful observation insert. The rain alert pipeline reads from this table instead of scanning the historical `weather_observations` table, which previously caused a full-table scan (~15k+ rows read) on every 5-minute alert evaluation.
+
 ## Before you begin
 
 1. Create the D1 database (once) if it doesn't already exist:

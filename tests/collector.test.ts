@@ -15,6 +15,7 @@ class FakeD1 {
   observations: Row[] = [];
   runs: Row[] = [];
   requests: Row[] = [];
+  latestUpserts: Row[] = [];
 
   prepare(_sql: string): {
     bind: (...args: unknown[]) => {
@@ -74,6 +75,10 @@ class FakeD1 {
             return { meta: { changes: 1 } };
           }
           return { meta: { changes: 0 } };
+        }
+        if (sql.includes("INTO latest_weather_observations")) {
+          self.latestUpserts.push({ location_id: args[0], observed_at: args[1] });
+          return { meta: { changes: 1 } };
         }
         if (sql.includes("INTO collector_runs")) {
           self.runs.push({ id: args[0], status: args[2] });
@@ -167,6 +172,13 @@ describe("collector orchestration", () => {
     expect(locs).toContain("loc-1");
     expect(locs).toContain("loc-3");
     expect(locs).not.toContain("loc-2");
+
+    // The materialized latest-state table must be maintained for each
+    // successfully stored observation (feeds the rain alert pipeline).
+    const latestLocs = (db as unknown as FakeD1).latestUpserts.map((o) => o.location_id);
+    expect(latestLocs).toContain("loc-1");
+    expect(latestLocs).toContain("loc-3");
+    expect(latestLocs).not.toContain("loc-2");
   });
 
   it("deduplicates identical observations (duplicate protection)", async () => {
