@@ -9,8 +9,9 @@ while guaranteeing that incoming weather observations continue to be
 collected and stored.
 
 This is a temporary conservation measure, **not** an architectural fix. The
-permanent fixes are tracked in `docs/performance-rollups-analysis.md`
-(Phase 2 already shipped in PR #14; incremental rollups are Phase 1/3).
+permanent fixes are tracked in `docs/incremental-rollups.md` (Phase 1 — incremental
+rollups, implemented; Phase 2 — read-path optimizations, already shipped in PR #14;
+Phase 3 — de-scoping the full-recompute from the hot path, also part of Phase 1).
 
 ## Flags
 
@@ -21,7 +22,7 @@ string `"true"`, behavior is identical to before this patch.
 
 | Flag | Effect | Reads removed |
 |---|---|---|
-| `DISABLE_ROLLUPS=true` | Skips `rollupObservations()` after each collection cycle. Collection itself is **not** skipped. | ~17,000 rows / 5 min ≈ **~4.9M rows/day** (the single largest consumer; full raw-table scan) |
+| `DISABLE_ROLLUPS=true` | Skips all rollup maintenance — both the incremental per-observation bucket updates (`updateHourlyBucket` / `updateDailyRow`) and the hourly repair job (`rollupObservations`). Collection itself is **not** skipped. | ~51k rows / day (down from ~4.9M with the incremental design; but in emergency mode even this is too much) |
 | `DISABLE_ALERTS=true` | `maybeRunWeatherAlerts()` returns immediately: no latest-station read, no rain/forecast alert state reads/writes, no push evaluation. | ~tens of rows / 5 min (small, but nonzero and quota-safe) |
 | `READ_ONLY_EMERGENCY=true` | `/api/observations/aggregate` and `/api/stations` return HTTP 503 with `{ "maintenance": true, "message": "Temporarily disabled due to database quota exhaustion" }` **without touching D1**. | ~15,400 rows per dashboard request (~100 rows/s per viewer at 60 s polling) ≈ up to **~0.9M rows/hour** while the dashboard is open |
 
@@ -34,10 +35,11 @@ Notes:
 - `insertObservation()`, `updateDashboardSummary()` and
   `upsertLatestObservation()` remain active (write-path, O(1) each) —
   observation collection and storage are preserved by design.
-- `DISABLE_ROLLUPS` means hourly/daily rollup tables stop being updated.
-  After re-enabling, the next rollup run recomputes the last 24 h and the
-  daily step re-reads touched days, so gaps heal automatically for recent
-  data; for longer outages see the analysis doc for a backfill approach.
+- `DISABLE_ROLLUPS` means hourly/daily rollup tables stop being updated (both
+  the incremental per-observation path and the hourly repair job are skipped).
+  After re-enabling, the repair job recomputes the last 2 hours on the next
+  `:00` cycle; for longer outages, run the backfill migration 0009 or wait for
+  the repair job to catch up over multiple hours.
 
 ## What is intentionally preserved
 

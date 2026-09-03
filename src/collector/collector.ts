@@ -12,7 +12,13 @@ import { insertObservation } from "../db/observations";
 import { upsertLatestObservation } from "../db/latest";
 import { createRun, finishRun, logRequest } from "../db/runs";
 import { updateDashboardSummary } from "../dashboard/summary";
-import { rollupObservations } from "../db/rollups";
+import {
+  rollupObservations,
+  updateDailyRow,
+  updateHourlyBucket,
+  shouldRunRollupRepair,
+  REPAIR_WINDOW_HOURS,
+} from "../db/rollups";
 
 /**
  * Collection orchestration.
@@ -102,16 +108,26 @@ export async function runCollection(
     requestsFailed,
   });
 
-  // Maintain historical rollups (hourly + daily). Best-effort: a rollup
-  // failure must not fail the collection run.
-  // Emergency D1 read conservation (docs/emergency-d1-mode.md): the rollup
-  // is the single largest read consumer (~17k rows/cycle). DISABLE_ROLLUPS
-  // skips it entirely; absent/unset keeps default behavior unchanged.
-  if (requestsSucceeded > 0 && env.DISABLE_ROLLUPS !== "true") {
+  // Rollup maintenance (docs/incremental-rollups.md):
+  //
+  // The 5-minute hot path does NOT recompute rollups anymore. Incremental
+  // O(bucket) bucket updates run per newly inserted observation inside
+  // collectOne(). This block is only the self-healing REPAIR job: it reruns
+  // at most once per hour (:00 cycle — the cron "*\/5 * * * *" always fires
+  // it) over a short sargable window, healing buckets missed by a failed
+  // best-effort update. Best-effort: a repair failure must not fail the
+  // collection run.
+  // Emergency D1 read conservation (docs/emergency-d1-mode.md): both the
+  // incremental updates and the repair are skipped by DISABLE_ROLLUPS.
+  if (
+    requestsSucceeded > 0 &&
+    env.DISABLE_ROLLUPS !== "true" &&
+    shouldRunRollupRepair(now)
+  ) {
     try {
-      await rollupObservations(env.DB);
+      await rollupObservations(env.DB, REPAIR_WINDOW_HOURS, now);
     } catch (rollupErr) {
-      console.warn(`[collector] observation rollup failed: ${errMessage(rollupErr)}`);
+      console.warn(`[collector] rollup repair failed: ${errMessage(rollupErr)}`);
     }
   }
 
@@ -291,6 +307,24 @@ async function collectOne(
       console.warn(
         `[collector] ${source.id} / ${location.id}: latest observation update failed: ${errMessage(latestErr)}`,
       );
+    }
+
+    // Incremental rollup maintenance (docs/incremental-rollups.md): recompute
+    // ONLY the (location, hour) bucket and the (location, day) row this new
+    // observation belongs to. Sargable, O(bucket) — never O(history). Only
+    // for genuinely new rows: INSERT OR IGNORE dedup means a duplicate must
+    // not trigger an update (the bucket already reflects it). Best-effort:
+    // a failure here must not fail the collection run; the hourly repair job
+    // in runCollection() heals any missed bucket.
+    if (stored.inserted && env.DISABLE_ROLLUPS !== "true") {
+      try {
+        const bucket = await updateHourlyBucket(env.DB, observation);
+        await updateDailyRow(env.DB, observation.location_id, bucket.day);
+      } catch (rollupErr) {
+        console.warn(
+          `[collector] ${source.id} / ${location.id}: incremental rollup update failed: ${errMessage(rollupErr)}`,
+        );
+      }
     }
 
     await logRequest(env.DB, {

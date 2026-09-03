@@ -7,17 +7,30 @@ import weatherComResponse from "./fixtures/weather-com-response.json";
  * EMERGENCY D1 READ CONSERVATION MODE (docs/emergency-d1-mode.md).
  *
  * Verifies that the emergency feature flags behave as documented:
- *  - DISABLE_ROLLUPS=true skips rollupObservations() entirely (collection
- *    itself is NOT skipped — observations must keep being stored);
+ *  - DISABLE_ROLLUPS=true skips ALL rollup work entirely — both the
+ *    incremental per-observation bucket updates (updateHourlyBucket /
+ *    updateDailyRow) and the hourly repair job (rollupObservations).
+ *    Collection itself is NOT skipped — observations must keep being stored;
  *  - READ_ONLY_EMERGENCY=true serves 503 maintenance responses on the
  *    expensive dashboard endpoints WITHOUT touching D1 (proved by a db
  *    whose prepare() throws);
- *  - with flags absent, behavior is unchanged (rollups run, endpoints query).
+ *  - with flags absent, behavior is unchanged (incremental updates run per
+ *    observation and the repair runs on the :00 cycle).
  */
 
-const rollupSpy = vi.hoisted(() => vi.fn(async () => {}));
+const rollupSpy = vi.hoisted(() => vi.fn(async () => ({ hourlyRows: 0, dailyRows: 0 })));
+const hourlyBucketSpy = vi.hoisted(() =>
+  vi.fn(async () => ({ hour: "2025-06-03 14:00", day: "2025-06-03" })),
+);
+const dailyRowSpy = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("../src/db/rollups", () => ({
   rollupObservations: rollupSpy,
+  updateHourlyBucket: hourlyBucketSpy,
+  updateDailyRow: dailyRowSpy,
+  // Repair guard pinned to "allowed" so the repair assertions below are
+  // deterministic regardless of the wall clock.
+  shouldRunRollupRepair: () => true,
+  REPAIR_WINDOW_HOURS: 2,
 }));
 
 import { runCollection } from "../src/collector/collector";
@@ -67,6 +80,8 @@ const okResponse = () => new Response(JSON.stringify(weatherComResponse), { stat
 
 beforeEach(() => {
   rollupSpy.mockClear();
+  hourlyBucketSpy.mockClear();
+  dailyRowSpy.mockClear();
 });
 
 describe("emergency D1 read conservation mode", () => {
@@ -82,11 +97,14 @@ describe("emergency D1 read conservation mode", () => {
     // Collection itself must continue: the observation fetch succeeded.
     expect(run.status).toBe("success");
     expect(run.requests_succeeded).toBe(1);
-    // But the rollup (largest read consumer) was skipped.
+    // But ALL rollup work was skipped: the per-observation incremental
+    // bucket updates and the hourly repair job.
     expect(rollupSpy).not.toHaveBeenCalled();
+    expect(hourlyBucketSpy).not.toHaveBeenCalled();
+    expect(dailyRowSpy).not.toHaveBeenCalled();
   });
 
-  it("without the flag, rollups still run after a successful collection", async () => {
+  it("without the flag, incremental updates run per observation and the repair runs", async () => {
     const db = new WriteOnlyD1();
     const fetchMock = vi.fn(() => Promise.resolve(okResponse()));
 
@@ -96,6 +114,9 @@ describe("emergency D1 read conservation mode", () => {
     });
 
     expect(run.status).toBe("success");
+    expect(hourlyBucketSpy).toHaveBeenCalledTimes(1);
+    expect(dailyRowSpy).toHaveBeenCalledTimes(1);
+    // Repair guard is mocked to "allowed"; the repair job must run once.
     expect(rollupSpy).toHaveBeenCalledTimes(1);
   });
 
