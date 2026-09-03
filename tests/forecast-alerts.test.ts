@@ -29,7 +29,12 @@ class FakeD1 {
       },
       run: async () => {
         if (sql.includes("weather_forecast_alert_state")) {
-          const [type, eventKey, eventTime, fingerprint] = args as string[];
+          const [type, eventKey, eventTime, fingerprint] = args as [
+            string,
+            string,
+            string,
+            string,
+          ];
           this.state.set(type, { event_key: eventKey, event_time: eventTime, fingerprint });
         }
         return { meta: { changes: 1 } };
@@ -41,7 +46,7 @@ class FakeD1 {
       bind: (...args: unknown[]) => execute(args),
       first: <T>() => execute([]).first<T>(),
       run: () => execute([]).run(),
-      all: <T>() => execute([]).all<T>(),
+      all: <T>() => execute([]).all() as Promise<{ results: T[] }>,
     };
   }
 }

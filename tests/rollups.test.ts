@@ -102,6 +102,15 @@ class FakeD1 {
         return null;
       },
       async all() {
+        // Repair job (A1): the station list. In production this reads
+        // weather_locations; in the mock it is derived from the observations
+        // present in the test data.
+        if (sql.includes("FROM weather_locations")) {
+          const ids = [
+            ...new Set(self.observations.map((o) => o.location_id as string)),
+          ];
+          return { results: ids.map((id) => ({ id })) };
+        }
         return { results: [] };
       },
     };

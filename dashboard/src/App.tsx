@@ -8,8 +8,6 @@ import NotificationSettings from "./NotificationSettings";
 import type { AggregateResponse, ForecastResponse, Station } from "./types";
 
 const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
-const AGGREGATES_REFRESH_MS = 60_000;
-const FORECAST_REFRESH_MS = 15 * 60_000;
 
 interface VarDef { key: string; label: string; unit: string; }
 
@@ -130,6 +128,9 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    // Fetch once per mount (first load / browser refresh) and whenever the
+    // user changes a filter. No polling: an idle tab generates zero queries
+    // (D1 read conservation, see docs/emergency-d1-mode.md).
     const refresh = async () => {
       if (cancelled || aggregateInFlight.current) return;
       aggregateInFlight.current = true;
@@ -144,20 +145,14 @@ export default function App() {
       }
     };
     void refresh();
-    const interval = window.setInterval(() => { void refresh(); }, AGGREGATES_REFRESH_MS);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [hours, selected]);
 
   useEffect(() => {
     let cancelled = false;
+    // Same policy as aggregates: fetch once per mount, no polling.
     const refresh = async () => {
       if (cancelled || forecastInFlight.current) return;
       forecastInFlight.current = true;
@@ -169,15 +164,8 @@ export default function App() {
       }
     };
     void refresh();
-    const interval = window.setInterval(() => { void refresh(); }, FORECAST_REFRESH_MS);
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

@@ -45,7 +45,9 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/") && request.method === "GET") {
-      const response = await handleApi(request, env.DB);
+      const response = await handleApi(request, env.DB, {
+        readOnlyEmergency: env.READ_ONLY_EMERGENCY === "true",
+      });
       if (response) return response;
     }
 
@@ -75,6 +77,13 @@ export default {
 
 /** Evaluate observation and forecast alerts after a successful collection. */
 async function maybeRunWeatherAlerts(env: Env): Promise<void> {
+  // Emergency D1 read conservation (docs/emergency-d1-mode.md): skip all
+  // alert processing and its D1 reads. Absent/unset keeps default behavior.
+  if (env.DISABLE_ALERTS === "true") {
+    console.log("[worker] DISABLE_ALERTS=true; skipping weather alerts");
+    return;
+  }
+
   const pushOptions = buildPushSendOptions(env);
   if (!pushOptions) {
     console.log("[worker] VAPID keys not configured; skipping weather alerts");

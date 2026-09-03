@@ -38,10 +38,15 @@ function pathMatches(url: URL, path: string): boolean {
 /**
  * Route an API request. Returns a Response for recognized endpoints, or null
  * if the path is not handled by the dashboard API.
+ *
+ * `emergency` carries the D1 read-conservation flags (docs/emergency-d1-mode.md):
+ * when `readOnlyEmergency` is true, the two expensive raw-scan endpoints are
+ * answered with a 503 maintenance response WITHOUT touching D1.
  */
 export async function handleApi(
   request: Request,
   db: D1Database,
+  emergency: { readOnlyEmergency?: boolean } = {},
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const origin = request.headers.get("origin");
@@ -50,13 +55,25 @@ export async function handleApi(
     return json({ error: "Method Not Allowed" }, 405, origin);
   }
 
+  const emergencyResponse = (): Response =>
+    json(
+      {
+        maintenance: true,
+        message: "Temporarily disabled due to database quota exhaustion",
+      },
+      503,
+      origin,
+    );
+
   if (pathMatches(url, "/api/stations")) {
+    if (emergency.readOnlyEmergency) return emergencyResponse();
     const { hours } = readQuery(url);
     const stations = await getStations(db, { hours });
     return json({ stations }, 200, origin);
   }
 
   if (pathMatches(url, "/api/observations/aggregate")) {
+    if (emergency.readOnlyEmergency) return emergencyResponse();
     const { hours, station } = readQuery(url);
     const aggregates = await getHourlyAverages(db, { hours, station });
     return json(

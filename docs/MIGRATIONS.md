@@ -16,6 +16,8 @@ Migration `0007_latest_weather_observations.sql` adds `latest_weather_observatio
 
 Migration `0008_hourly_wind_gust_min.sql` adds the missing `wind_gust_min` column to `weather_observations_hourly`. The rollup query has always inserted this column, but it was never part of the table definition in `0005_observation_rollups.sql`, so every rollup execution failed silently (best-effort catch in the collector) and no hourly/daily rollups were ever persisted. This was discovered by the real-SQLite integration tests in `tests/timestamp-comparison.test.ts`.
 
+Migration `0009_backfill_rollups.sql` performs a one-time idempotent backfill of the historical hourly/daily rollup aggregates. Because migration 0008-era failures meant no rollups were ever persisted, the backfill recomputes the full raw history into `weather_observations_hourly` and `weather_observations_daily` via idempotent upserts (no schema change, no `ALTER TABLE`). It also applies the 180-day hourly retention clamp. See `docs/incremental-rollups.md` for context on the incremental rollup architecture.
+
 ## Before you begin
 
 1. Create the D1 database (once) if it doesn't already exist:

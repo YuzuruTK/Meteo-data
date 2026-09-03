@@ -18,5 +18,15 @@ export interface Env {
   FORECAST_RAIN_PROBABILITY_PERCENT?: string;
   FORECAST_RAIN_START_SHIFT_MINUTES?: string;
   FORECAST_ALERT_HORIZON_HOURS?: string;
+  /**
+   * Emergency D1 read-conservation flags (see docs/emergency-d1-mode.md).
+   * All default to disabled; set to "true" to activate.
+   */
+  /** Skip rollupObservations() after collection (no rollup reads). */
+  DISABLE_ROLLUPS?: string;
+  /** Skip all weather-alert processing (no alert-related reads). */
+  DISABLE_ALERTS?: string;
+  /** Serve 503 maintenance responses for expensive dashboard endpoints without touching D1. */
+  READ_ONLY_EMERGENCY?: string;
   [key: string]: unknown;
 }
