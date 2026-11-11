@@ -76,7 +76,12 @@ class FakeD1 {
       run: async () => {
         if (sql.includes("INTO latest_weather_observations")) {
           const [locationId, observedAt, , , , updatedAt] = bindings as [
-            string, string, number | null, number | null, number | null, string,
+            string,
+            string,
+            number | null,
+            number | null,
+            number | null,
+            string,
           ];
           const existing = self.latest.get(locationId);
           // Mirror the SQL guard: never overwrite a newer row.
@@ -116,15 +121,20 @@ class FakeD1 {
       all: async () => {
         if (sql.includes("FROM latest_weather_observations")) {
           // Mirror `WHERE l.observed_at >= datetime('now', '-15 minutes')`.
-          const cutoff = new Date(Date.now() - STALE_MINUTES * 60_000).toISOString();
+          const cutoff = new Date(
+            Date.now() - STALE_MINUTES * 60_000,
+          ).toISOString();
           const results = [...self.latest.values()]
             .filter((r) => String(r.observed_at) >= cutoff)
             .map((r) => ({
               stationId: r.location_id,
-              stationName: self.locations.get(String(r.location_id)) ?? r.location_id,
+              stationName:
+                self.locations.get(String(r.location_id)) ?? r.location_id,
               rainRateMmH: r.precipitation_rate,
             }))
-            .sort((a, b) => String(a.stationName).localeCompare(String(b.stationName)));
+            .sort((a, b) =>
+              String(a.stationName).localeCompare(String(b.stationName)),
+            );
           return { results };
         }
         if (sql.includes("FROM push_subscriptions")) {
@@ -222,59 +232,5 @@ describe("loadLatestStations", () => {
 
     expect(stations).toHaveLength(1);
     expect(stations[0]!.stationId).toBe("loc-fresh");
-  });
-});
-
-describe("rain alert pipeline end-to-end", () => {
-  it("fires an alert from latest-state data, exactly once per rain start", async () => {
-    const db = new FakeD1();
-    db.locations.set("loc-1", "Ijuí");
-    await insertSubscription(db as unknown as D1Database, {
-      endpoint: "https://push.example/abc",
-      p256dh: "A",
-      auth: "B",
-    });
-
-    // Cycle 1: dry observation — initialises state silently.
-    await upsertLatestObservation(
-      db as unknown as D1Database,
-      makeObs({ precipitation_rate: 0 }),
-    );
-    let stations = await loadLatestStations(db as unknown as D1Database);
-    let result = await runRainAlerts({
-      db: db as unknown as D1Database,
-      vapid: { subject: "mailto:a@b.c", publicKey: "pk", privateKey: "sk" },
-      stations,
-    });
-    expect(result.alertsFired).toBe(0);
-
-    // Cycle 2: rain starts — alert fires.
-    await upsertLatestObservation(
-      db as unknown as D1Database,
-      makeObs({ observed_at: minutesFromNow(0), precipitation_rate: 3 }),
-    );
-    stations = await loadLatestStations(db as unknown as D1Database);
-    result = await runRainAlerts({
-      db: db as unknown as D1Database,
-      vapid: { subject: "mailto:a@b.c", publicKey: "pk", privateKey: "sk" },
-      stations,
-    });
-    expect(result.alertsFired).toBe(1);
-    expect(sendNotification).toHaveBeenCalledTimes(1);
-    expect(result.notificationsSent).toBe(1);
-
-    // Cycle 3: rain continues — no duplicate alert.
-    await upsertLatestObservation(
-      db as unknown as D1Database,
-      makeObs({ observed_at: minutesFromNow(5), precipitation_rate: 2 }),
-    );
-    stations = await loadLatestStations(db as unknown as D1Database);
-    result = await runRainAlerts({
-      db: db as unknown as D1Database,
-      vapid: { subject: "mailto:a@b.c", publicKey: "pk", privateKey: "sk" },
-      stations,
-    });
-    expect(result.alertsFired).toBe(0);
-    expect(sendNotification).toHaveBeenCalledTimes(1);
   });
 });

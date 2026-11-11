@@ -64,7 +64,8 @@ export async function updateDashboardSummary(
          uv_index = excluded.uv_index,
          cloud_cover = excluded.cloud_cover,
          visibility = excluded.visibility,
-         updated_at = excluded.updated_at`,
+         updated_at = excluded.updated_at
+       WHERE julianday(excluded.observed_at) > julianday(dashboard_summary.observed_at)`,
     )
     .bind(
       obs.location_id,

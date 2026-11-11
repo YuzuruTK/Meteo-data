@@ -71,3 +71,10 @@ npx wrangler d1 migrations create meteo-data describe_change
 
 - Migrations are idempotent-safe because they use `CREATE TABLE IF NOT EXISTS`.
 - Do not destroy existing data — only add new tables/columns.
+## 0010 / 0011 ? rain delivery and device preferences
+
+0010 extends existing rain state and subscriptions without dropping records; adds events, batches and deliveries with uniqueness and scheduling indexes. Old rain states start with null observation timestamps, deliberately causing silent bootstrap. Legacy subscriptions receive opaque IDs and retain all stations/types in English. Preferences are validated JSON, updated atomically; token hashes never appear in public responses.
+
+0011 adds expiring registration-budget counters and a batch-retention index. Apply both migrations before the updated Worker/assets. Existing migrations 0001?0009 are unchanged. Fresh installation was exercised with Wrangler D1 local; upgrade with legacy rows and rollback of a failed state/event batch are covered by real SQLite tests.
+
+Production backup/migration/deploy remains a separate operation. Disable alerts when rolling back code: the old broadcaster does not respect v2 preferences.

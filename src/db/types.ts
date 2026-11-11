@@ -26,6 +26,7 @@ export interface Env {
   DISABLE_ROLLUPS?: string;
   /** Skip all weather-alert processing (no alert-related reads). */
   DISABLE_ALERTS?: string;
+  RAIN_ALERT_DELIVERY_MODE?: "live" | "shadow";
   /** Serve 503 maintenance responses for expensive dashboard endpoints without touching D1. */
   READ_ONLY_EMERGENCY?: string;
   [key: string]: unknown;

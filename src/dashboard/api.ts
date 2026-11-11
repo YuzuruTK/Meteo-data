@@ -46,7 +46,11 @@ function pathMatches(url: URL, path: string): boolean {
 export async function handleApi(
   request: Request,
   db: D1Database,
-  emergency: { readOnlyEmergency?: boolean } = {},
+  emergency: {
+    readOnlyEmergency?: boolean;
+    rainAvailable?: boolean;
+    alertReason?: string;
+  } = {},
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const origin = request.headers.get("origin");
@@ -68,7 +72,18 @@ export async function handleApi(
   if (pathMatches(url, "/api/stations")) {
     if (emergency.readOnlyEmergency) return emergencyResponse();
     const { hours } = readQuery(url);
-    const stations = await getStations(db, { hours });
+    const stations =
+      url.searchParams.get("includeInactive") === "true"
+        ? (
+            await db
+              .prepare(
+                `SELECT w.id,w.source_id,w.name,l.observed_at AS last_observed_at,
+          CASE WHEN l.observed_at IS NULL OR datetime(l.observed_at)<datetime('now','-15 minutes') THEN 1 ELSE 0 END AS stale
+          FROM weather_locations w LEFT JOIN latest_weather_observations l ON l.location_id=w.id ORDER BY w.name`,
+              )
+              .all()
+          ).results
+        : await getStations(db, { hours });
     return json({ stations }, 200, origin);
   }
 
@@ -89,7 +104,40 @@ export async function handleApi(
 
   if (pathMatches(url, "/api/summary")) {
     const summaries = await getDashboardSummaries(db);
-    return json({ summaries }, 200, origin);
+    const events = emergency.rainAvailable
+      ? (
+          await db
+            .prepare(
+              `SELECT s.station_id,e.id,e.observed_at AS observedAt,e.detected_at AS detectedAt
+      FROM weather_alert_state s JOIN rain_events e ON e.id=s.last_event_id
+      WHERE s.raining=1 AND s.episode_started_observed_at=e.observed_at`,
+            )
+            .all<{
+              station_id: string;
+              id: string;
+              observedAt: string;
+              detectedAt: string;
+            }>()
+        ).results
+      : [];
+    return json(
+      {
+        summaries: summaries.map((s) => ({
+          ...s,
+          rainEvent: events.find((e) => e.station_id === s.location_id) ?? null,
+        })),
+        meta: {
+          serverTime: new Date().toISOString(),
+          staleAfterMinutes: 15,
+          alerting: {
+            rainAvailable: emergency.rainAvailable ?? false,
+            reason: emergency.alertReason,
+          },
+        },
+      },
+      200,
+      origin,
+    );
   }
 
   return null;

@@ -49,7 +49,7 @@ describe("forecast: mapOpenMeteoResponse", () => {
     expect(result.hourly).toHaveLength(2);
 
     const first = result.hourly[0]!;
-    expect(first.time).toBe("2026-08-21T12:00");
+    expect(first.time).toBe("2026-08-21T12:00Z");
     expect(first.temperature).toBe(22.3);
     expect(first.humidity).toBe(75);
     expect(first.precipitationProbability).toBe(35);

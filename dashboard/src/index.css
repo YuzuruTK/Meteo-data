@@ -1,131 +1,421 @@
 :root {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color: #1f2933;
-  background: #f5f7fa;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #162a3a;
+  background: #f4f7fa;
+  font-synthesis: none;
+  --muted: #526574;
+  --primary: #075985;
+  --border: #d8e2ea;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+select {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+}
+button {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+button.secondary {
+  background: white;
+  color: var(--primary);
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+select {
+  background: white;
+  color: inherit;
+  max-width: 100%;
+}
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+h1 {
+  font-size: 1.65rem;
+  margin-bottom: 2px;
+  letter-spacing: -0.04em;
+}
+h2 {
+  font-size: 1.3rem;
+  letter-spacing: -0.025em;
+  margin-bottom: 12px;
+}
+h3 {
+  font-size: 1.1rem;
+}
+p {
+  line-height: 1.6;
+}
+small,
+.muted {
+  color: var(--muted);
+}
+.app {
+  max-width: 1200px;
+  padding: 32px 24px;
+  margin: auto;
+}
+.header,
+.brand,
+.toolbar,
+.section-title,
+.controls,
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header {
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+.header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.brand-icon {
+  width: 52px;
+  height: 52px;
+  background: #075985;
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 32px;
+  border-radius: 16px;
+}
+.toolbar {
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  align-items: flex-end;
+}
+.toolbar .muted {
+  font-size: 0.8rem;
+  align-self: center;
+}
+.toolbar label {
+  min-width: 220px;
+}
+main {
+  display: grid;
+  gap: 24px;
+}
+.card,
+.rain-hero {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 0;
+}
+.rain-hero {
+  background: #eef4f7;
+  border-left: 5px solid #526574;
+}
+.rain-hero.wet {
+  background: #e8f4fc;
+  border-left-color: #075985;
+}
+.rain-hero h2 {
+  font-size: clamp(1.6rem, 4vw, 2.3rem);
+  margin: 12px 0 24px;
+  max-width: 900px;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #075985;
+}
+.rain-readings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 20px;
+}
+.rain-readings > div {
+  display: grid;
+  gap: 7px;
+}
+.rain-readings span {
+  font-size: 0.875rem;
+}
+.rain-readings small {
+  font-size: 0.8rem;
+}
+.rain-hero > p:last-child {
+  margin: 20px 0 0;
+  font-size: 0.85rem;
+}
+.section-title {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.section-title p {
+  margin: 0;
+}
+.conditions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+.temperature {
+  font-size: 3rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: -0.05em;
+  margin: 16px 0 24px;
+}
+.temperature small {
+  font-size: 1.25rem;
+}
+.metrics {
+  margin: 0;
+}
+.metrics > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #edf1f5;
+  padding: 12px 0;
+}
+.metrics dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 65%;
+}
+.metrics dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.metrics dd small {
+  font-size: 0.75rem;
+}
+.chart-wrap {
+  height: 340px;
+  margin: 24px 0;
+  font-size: 0.75rem;
+}
+.table-wrap {
+  overflow: auto;
+  max-height: 450px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+td,
+th {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+caption {
+  padding: 16px;
+  text-align: left;
+  color: var(--muted);
+}
+summary {
+  cursor: pointer;
+  padding: 14px 0;
+  color: var(--primary);
+  font-weight: 600;
+}
+.forecast-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin: 24px 0;
+}
+.forecast-grid strong {
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+}
+.notifications {
+  border-top: 3px solid #075985;
+}
+.notification-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 16px 0 0;
+  max-width: 900px;
+}
+fieldset {
+  border: 0;
+  padding: 16px 0;
+  margin: 0;
+}
+legend {
+  font-weight: 600;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 400;
+}
+.check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+.station-choices {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+.actions {
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+footer {
+  text-align: center;
+  padding: 32px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+:focus-visible {
+  outline: 3px solid #075985;
+  outline-offset: 4px;
+}
+.skip-link {
+  position: absolute;
+  top: -100px;
+  background: white;
+  padding: 12px;
+  z-index: 10;
+}
+.skip-link:focus {
+  top: 0;
+}
+[role="alert"] {
+  color: #a61b2b;
+}
+.controls {
+  flex-wrap: wrap;
+}
+.controls label {
+  max-width: 100%;
+}
+@media (max-width: 600px) {
+  .app {
+    padding: 20px 16px;
+  }
+  .header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .brand-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .card,
+  .rain-hero {
+    padding: 20px 16px;
+  }
+  .toolbar > label {
+    flex: 1;
+    min-width: 180px;
+  }
+  .toolbar > button {
+    flex: 1;
+  }
+  .section-title {
+    align-items: flex-start;
+  }
+  .conditions-grid {
+    grid-template-columns: 1fr;
+  }
+  .forecast-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .chart-wrap {
+    height: 280px;
+  }
+  .controls {
+    width: 100%;
+  }
+  .controls label {
+    flex: 1;
+  }
+  .actions > button {
+    width: 100%;
+  }
+  .rain-readings {
+    grid-template-columns: 1fr;
+  }
+  .header label {
+    font-size: 0.8rem;
+  }
+  .history {
+    padding: 20px 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
-* { box-sizing: border-box; }
-
-.app { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
-
-.header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.header h1 { margin: 0; font-size: 1.5rem; }
-
-.controls { display: flex; flex-wrap: wrap; gap: 16px; }
-.controls label { display: flex; flex-direction: column; font-size: 0.85rem; color: #52606d; }
-.controls select { margin-top: 4px; padding: 6px 10px; border: 1px solid #cbd2d9; border-radius: 6px; background: #fff; }
-
-.error { padding: 12px 14px; background: #fdecea; color: #b00020; border-radius: 8px; margin-bottom: 16px; }
-.loading { color: #52606d; padding: 40px 0; text-align: center; }
-
-.chart-card { background: #fff; border: 1px solid #e4e7eb; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(16, 42, 67, 0.05); }
-.chart-card h2 { margin: 0 0 12px; font-size: 1.1rem; color: #3e4c59; }
-
-/* Fixed-height wrapper so Recharts' ResponsiveContainer can measure and render. */
-.chart-wrap { width: 100%; height: 260px; }
-
-.table-wrap { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-th, td { border: 1px solid #e4e7eb; padding: 6px 8px; text-align: right; }
-th { background: #f0f4f8; position: sticky; top: 0; }
-td:first-child, th:first-child { text-align: left; }
-td:last-child, th:last-child { text-align: right; }
-
-/* Toggle control in the header */
-.toggle { display: flex; flex-direction: row; align-items: center; gap: 6px; font-size: 0.85rem; color: #52606d; }
-.toggle input { margin: 0; }
-
-/* Latest-readings summary */
-.summary { margin-bottom: 20px; }
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.summary-card { background: #fff; border: 1px solid #e4e7eb; border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(16, 42, 67, 0.05); }
-.summary-card.gauge-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.summary-label { display: block; font-size: 0.78rem; color: #52606d; margin-bottom: 8px; text-align: center; }
-.summary-value { display: block; font-size: 1.05rem; font-weight: 600; color: #1f2933; }
-.summary-caption { margin-top: 10px; font-size: 0.8rem; color: #7b8794; }
-
-/* --- Temperature thermometer --- */
-.thermometer { display: flex; gap: 10px; align-items: stretch; justify-content: center; min-height: 150px; }
-.therm-rail { position: relative; width: 18px; height: 150px; border-radius: 9px; background: #e4e7eb; overflow: hidden; }
-.therm-fill { position: absolute; left: 0; right: 0; bottom: 0; background: #e53935; }
-.therm-bulb { position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%); width: 26px; height: 26px; border-radius: 50%; border: 2px solid #e4e7eb; }
-.therm-labels { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; font-size: 0.72rem; color: #7b8794; }
-.therm-current { font-size: 1.05rem; font-weight: 700; }
-
-/* --- Humidity ring --- */
-.ring-wrap { position: relative; width: 96px; height: 96px; }
-.ring { width: 96px; height: 96px; }
-.ring-value { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.1rem; font-weight: 700; color: #1f2933; }
-.ring-label { margin-top: 4px; font-size: 0.78rem; font-weight: 600; }
-
-/* --- UV scale --- */
-.uv-wrap { width: 100%; }
-.uv-track { position: relative; display: flex; height: 14px; border-radius: 7px; overflow: hidden; }
-.uv-seg { flex: 1; }
-.uv-marker { position: absolute; top: -3px; width: 3px; height: 20px; background: #1f2933; border-radius: 2px; transform: translateX(-50%); }
-.uv-labels { display: flex; justify-content: space-between; font-size: 0.62rem; color: #7b8794; margin-top: 3px; }
-.uv-value { margin-top: 8px; font-size: 1rem; font-weight: 700; }
-
-/* --- Solar bar --- */
-.solar-wrap { width: 100%; }
-.bar-track { height: 12px; border-radius: 6px; background: #e4e7eb; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 6px; }
-.bar-value { margin-top: 6px; font-size: 0.95rem; font-weight: 600; color: #1f2933; }
-.bar-label { font-size: 0.78rem; font-weight: 600; }
-
-/* --- Rain status --- */
-.precip-wrap { text-align: center; }
-.precip-status { font-size: 1.1rem; font-weight: 700; }
-.precip-value { margin-top: 4px; font-size: 0.85rem; color: #52606d; }
-
-/* --- Wind summary --- */
-.wind-wrap { text-align: center; }
-.wind-main { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
-.wind-value { font-size: 1.3rem; font-weight: 700; color: #1f2933; }
-.wind-unit { font-size: 0.78rem; color: #52606d; }
-.wind-dir { font-size: 0.85rem; color: #3e4c59; }
-.wind-cat { margin-top: 4px; font-size: 0.78rem; font-weight: 600; }
-
-/* --- Pressure --- */
-.pressure-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.pressure-value { font-size: 1.1rem; font-weight: 700; color: #1f2933; }
-.pressure-trend { font-size: 1.3rem; line-height: 1; }
-.pressure-label { font-size: 0.78rem; color: #52606d; }
-
-/* --- Precipitation total --- */
-.today-value { font-size: 1.5rem; font-weight: 700; color: #1f2933; text-align: center; }
-
-/* --- Forecast summary (Open-Meteo) --- */
-.forecast-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.forecast-temp { font-size: 1.4rem; font-weight: 700; color: #1f2933; margin-bottom: 4px; }
-.forecast-detail { font-size: 0.82rem; color: #52606d; margin-bottom: 2px; }
-.forecast-attribution { margin-top: 6px; font-size: 0.7rem; color: #9aa5b1; }
-
-/* --- Rain Alerts / Notification settings --- */
-.notification-card { margin-bottom: 20px; }
-.notification-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 0.9rem; }
-.notification-label { color: #52606d; }
-.notification-permission { font-weight: 600; color: #1f2933; }
-.notification-value { color: #1f2933; }
-.notification-actions { margin-top: 12px; }
-.notification-btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
-.notification-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-.notification-btn.subscribe { background: #1e88e5; color: #fff; }
-.notification-btn.subscribe:hover:not(:disabled) { background: #1976d2; }
-.notification-btn.unsubscribe { background: #fdecea; color: #b00020; border: 1px solid #f5c6cb; }
-.notification-btn.unsubscribe:hover:not(:disabled) { background: #fbd5d3; }
-.notification-hint { margin-top: 10px; font-size: 0.8rem; color: #7b8794; }
-
-/* Wind panel */
-.wind-row { display: flex; flex-wrap: wrap; gap: 24px; }
-.wind-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.station-label { font-size: 0.85rem; color: #3e4c59; font-weight: 600; }
-.compass { position: relative; width: 96px; height: 96px; border: 1px solid #cbd2d9; border-radius: 50%; background: #f0f4f8; }
-.compass-n, .compass-e, .compass-s, .compass-w { position: absolute; font-size: 0.72rem; font-weight: 700; color: #52606d; }
-.compass-n { top: 3px; left: 50%; transform: translateX(-50%); }
-.compass-e { right: 5px; top: 50%; transform: translateY(-50%); }
-.compass-s { bottom: 3px; left: 50%; transform: translateX(-50%); }
-.compass-w { left: 5px; top: 50%; transform: translateY(-50%); }
-.compass-arrow { position: absolute; top: 50%; left: 50%; font-size: 1.4rem; line-height: 1; color: #b00020; }
-.wind-speed { font-size: 0.85rem; color: #3e4c59; }
-.wind-direction { display: block; text-align: center; font-size: 0.78rem; color: #7b8794; }
+.section-title > div,
+.controls label {
+  min-width: 0;
+}
+.controls select {
+  width: 100%;
+}
+@media (max-width: 360px) {
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .toolbar label {
+    min-width: 0;
+    width: 100%;
+  }
+}

@@ -97,6 +97,7 @@ docs/                                how-to guides
 
 See:
 
+- [Dashboard UI/UX and rain-alert execution plan (pt-BR)](docs/planejamento-ui-ux-chuva/README.md) — repository-based specifications, implementation batches, validation, and a handoff prompt for the implementing model. Planning only; proposed changes are not implemented yet.
 - [docs/SECRETS.md](docs/SECRETS.md) — configure Cloudflare secrets.
 - [docs/MIGRATIONS.md](docs/MIGRATIONS.md) — apply the D1 migration.
 - [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) — run the Worker locally.
@@ -149,3 +150,8 @@ curl -X POST https://YOUR_WORKER.workers.dev/ \
 ```
 
 If `COLLECTOR_TRIGGER_SECRET` is not set, the endpoint returns `403 Forbidden` and is effectively disabled.
+
+
+### Dashboard e alertas por esta??o
+
+O painel usa a ?ltima observa??o em `/api/summary`, separa hist?rico hor?rio de previs?o regional e permite configurar chuva observada por esta??o/dispositivo. Os epis?dios de chuva e suas entregas s?o persistidos no D1, com retry limitado, expira??o e prefer?ncias v2. Aplicar migrations **0010 e 0011** antes de implantar esta vers?o. Consulte [opera??o dos alertas](docs/PUSH-NOTIFICATIONS.md), [valida??o e limites](docs/planejamento-ui-ux-chuva/07-REGISTRO-DE-EXECUCAO.md) e [capturas](docs/evidence/README.md).

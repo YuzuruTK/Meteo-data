@@ -2,13 +2,14 @@
 
 ## Prerequisites
 
-- Node.js 20+ and npm.
+- Node.js 22.23+ and npm (SQLite tests must execute, not skip).
 - (Optional) a D1 database created in your Cloudflare account.
 
 ## 1. Install dependencies
 
 ```bash
-npm install
+npm ci
+npm --prefix dashboard ci
 ```
 
 ## 2. Set up local secrets
@@ -82,3 +83,19 @@ sqlite3 .wrangler/state/v3/d1/<database-id>.sqlite "SELECT * FROM weather_observ
 
 - The scheduled handler awaits the collection directly so Cloudflare can track completion and surface failures.
 - Logs are concise: a summary per run, plus per-request store/failure lines. No secrets are ever logged.
+## Dashboard and rain delivery validation
+
+```bash
+npm run typecheck
+npm test
+npm --prefix dashboard test
+npm run build:dashboard
+npm run build
+npm run migrate:local
+npm --prefix dashboard exec playwright install chromium
+npm --prefix dashboard run test:e2e
+```
+
+`build` is a Worker dry-run; `deploy` publishes. Browser tests launch a local preview of the built dashboard and intercept APIs with isolated fixtures; production continues to use real API responses. Screenshots are written to `docs/evidence/`.
+
+For local notification experimentation, use separate VAPID keys and `RAIN_ALERT_DELIVERY_MODE=shadow` initially. Never run the administrative broadcast test against production subscribers. Use the per-device test after explicit activation in the test environment.

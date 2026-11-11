@@ -1,4 +1,8 @@
-import type { ForecastHourly, ForecastResponse, OpenMeteoResponse } from "./types";
+import type {
+  ForecastHourly,
+  ForecastResponse,
+  OpenMeteoResponse,
+} from "./types";
 
 /**
  * Open-Meteo forecast client.
@@ -45,20 +49,27 @@ function buildUrl(latitude: number, longitude: number): string {
   return `${OPEN_METEO_ENDPOINT}?${params.toString()}`;
 }
 
-function numberOrUndefined(value: number | undefined | null): number | undefined {
+function numberOrUndefined(
+  value: number | undefined | null,
+): number | undefined {
   if (typeof value !== "number" || Number.isNaN(value)) return undefined;
   return value;
 }
 
 /** Map a raw Open-Meteo response into the /api/forecast shape. */
-export function mapOpenMeteoResponse(raw: OpenMeteoResponse): ForecastResponse {
+export function mapOpenMeteoResponse(
+  raw: OpenMeteoResponse,
+  fetchedAt = new Date().toISOString(),
+): ForecastResponse {
   const hours = raw.hourly;
   const count = hours.time.length;
 
   const hourly: ForecastHourly[] = [];
   for (let i = 0; i < count; i++) {
     hourly.push({
-      time: hours.time[i]!,
+      time: /Z$|[+-]\d\d:\d\d$/.test(hours.time[i]!)
+        ? hours.time[i]!
+        : hours.time[i]! + "Z",
       temperature: hours.temperature_2m[i]!,
       humidity: hours.relative_humidity_2m[i]!,
       precipitationProbability: hours.precipitation_probability[i]!,
@@ -72,7 +83,7 @@ export function mapOpenMeteoResponse(raw: OpenMeteoResponse): ForecastResponse {
   }
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: fetchedAt,
     hourly,
   };
 }
@@ -92,7 +103,11 @@ export async function getForecast(): Promise<ForecastResponse> {
     const cachedResponse = await cache.match(url);
     if (cachedResponse) {
       const raw = (await cachedResponse.json()) as OpenMeteoResponse;
-      return mapOpenMeteoResponse(raw);
+      return mapOpenMeteoResponse(
+        raw,
+        cachedResponse.headers.get("x-meteo-fetched-at") ??
+          new Date().toISOString(),
+      );
     }
   }
 
@@ -107,6 +122,7 @@ export async function getForecast(): Promise<ForecastResponse> {
 
   const raw = (await response.json()) as OpenMeteoResponse;
 
+  const fetchedAt = new Date().toISOString();
   // Cache the raw Open-Meteo JSON for the configured TTL. The Cache API
   // honors the response's own freshness headers, so set an explicit max-age.
   if (cache) {
@@ -115,13 +131,14 @@ export async function getForecast(): Promise<ForecastResponse> {
       new Response(JSON.stringify(raw), {
         headers: {
           "content-type": "application/json",
+          "x-meteo-fetched-at": fetchedAt,
           "cache-control": `max-age=${CACHE_TTL_SECONDS}`,
         },
       }),
     );
   }
 
-  return mapOpenMeteoResponse(raw);
+  return mapOpenMeteoResponse(raw, fetchedAt);
 }
 
 export { CACHE_TTL_SECONDS };

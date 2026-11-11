@@ -30,7 +30,7 @@ export async function upsertLatestObservation(
          updated_at = excluded.updated_at
        -- Guard against out-of-order arrival: a late-arriving older
        -- observation must never overwrite a newer one.
-       WHERE excluded.observed_at >= latest_weather_observations.observed_at`,
+       WHERE julianday(excluded.observed_at) > julianday(latest_weather_observations.observed_at)`,
     )
     .bind(
       obs.location_id,
@@ -47,6 +47,8 @@ export interface LatestStation {
   stationId: string;
   stationName: string;
   rainRateMmH: number | null;
+  observedAt?: string;
+  updatedAt?: string;
 }
 
 /** Minutes after which a latest observation is considered stale for alerts. */
@@ -67,6 +69,7 @@ export async function loadLatestStations(
       `SELECT
          wl.id AS stationId,
          wl.name AS stationName,
+         l.observed_at AS observedAt, l.updated_at AS updatedAt,
          l.precipitation_rate AS rainRateMmH
        FROM latest_weather_observations l
        JOIN weather_locations wl

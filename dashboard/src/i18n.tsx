@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { en } from "./locales/en";
 import { es, postProcessEs } from "./locales/es";
 import { ptBR, postProcessPtBR } from "./locales/pt-BR";
@@ -7,7 +15,11 @@ export type Locale = "pt-BR" | "en" | "es";
 
 const STORAGE_KEY = "meteo-data-locale";
 const DEFAULT_LOCALE: Locale = "pt-BR";
-const resources: Record<Locale, Record<string, string>> = { "pt-BR": ptBR, en, es };
+const resources: Record<Locale, Record<string, string>> = {
+  "pt-BR": ptBR,
+  en,
+  es,
+};
 const supportedLocales = Object.keys(resources) as Locale[];
 
 const originalText = new WeakMap<Text, string>();
@@ -24,9 +36,16 @@ function isSupported(value: string | null | undefined): value is Locale {
 
 export function detectLocale(): Locale {
   if (typeof window === "undefined") return DEFAULT_LOCALE;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    /* Dashboard works with storage disabled. */
+  }
   if (isSupported(stored)) return stored;
-  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  const languages = navigator.languages?.length
+    ? navigator.languages
+    : [navigator.language];
   for (const language of languages) {
     const normalized = language.toLowerCase();
     if (normalized === "pt-br" || normalized.startsWith("pt-")) return "pt-BR";
@@ -46,14 +65,15 @@ export function detectLocale(): Locale {
 export function translateValue(value: string, locale: Locale): string {
   if (locale === "en") return value;
   let result = value;
-  for (const [source, target] of Object.entries(resources[locale]).sort(([a], [b]) => b.length - a.length)) {
+  for (const [source, target] of Object.entries(resources[locale]).sort(
+    ([a], [b]) => b.length - a.length,
+  )) {
     result = result.split(source).join(target);
   }
   if (locale === "pt-BR") result = postProcessPtBR(result);
   else if (locale === "es") result = postProcessEs(result);
   return result;
 }
-
 
 function shouldIgnore(node: Node): boolean {
   return node.parentElement?.closest("[data-i18n-ignore]") !== null;
@@ -78,15 +98,23 @@ function translateTextNode(node: Text): void {
 }
 
 function translateAttributes(root: ParentNode): void {
-  for (const element of root.querySelectorAll<HTMLElement>("[title], [aria-label]")) {
+  for (const element of root.querySelectorAll<HTMLElement>(
+    "[title], [aria-label]",
+  )) {
     if (element.closest("[data-i18n-ignore]")) continue;
     let values = originalAttributes.get(element);
-    if (!values) { values = new Map(); originalAttributes.set(element, values); }
+    if (!values) {
+      values = new Map();
+      originalAttributes.set(element, values);
+    }
     for (const attribute of ["title", "aria-label"] as const) {
       const value = element.getAttribute(attribute);
       if (value === null) continue;
       if (!values.has(attribute)) values.set(attribute, value);
-      element.setAttribute(attribute, translateValue(values.get(attribute) ?? value, activeLocale));
+      element.setAttribute(
+        attribute,
+        translateValue(values.get(attribute) ?? value, activeLocale),
+      );
     }
   }
 }
@@ -101,7 +129,12 @@ function translateAttributes(root: ParentNode): void {
  */
 function collectTextNodes(root: Node): Text[] {
   if (root.nodeType === Node.TEXT_NODE) return [root as Text];
-  if (!(root instanceof Element || root instanceof DocumentFragment || root instanceof Document)) return [];
+  if (!(
+    root instanceof Element ||
+    root instanceof DocumentFragment ||
+    root instanceof Document
+  ))
+    return [];
   const elements: Element[] = [];
   if (root instanceof Element) elements.push(root);
   elements.push(...Array.from(root.querySelectorAll("*")));
@@ -115,18 +148,31 @@ function collectTextNodes(root: Node): Text[] {
 }
 
 function translateRoot(root: Node): void {
-  if (root.nodeType === Node.TEXT_NODE) { translateTextNode(root as Text); return; }
-  if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+  if (root.nodeType === Node.TEXT_NODE) {
+    translateTextNode(root as Text);
+    return;
+  }
+  if (
+    root.nodeType !== Node.ELEMENT_NODE &&
+    root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE
+  )
+    return;
   if (root instanceof Element && root.hasAttribute("data-i18n-ignore")) return;
   for (const textNode of collectTextNodes(root)) translateTextNode(textNode);
-  if (root instanceof Element || root instanceof DocumentFragment) translateAttributes(root);
+  if (root instanceof Element || root instanceof DocumentFragment)
+    translateAttributes(root);
 }
 
 function flushPending(): void {
   frame = null;
   applying = true;
-  try { for (const node of pending) if (node.isConnected || node === document.body) translateRoot(node); }
-  finally { pending.clear(); applying = false; }
+  try {
+    for (const node of pending)
+      if (node.isConnected || node === document.body) translateRoot(node);
+  } finally {
+    pending.clear();
+    applying = false;
+  }
 }
 
 function schedule(node: Node): void {
@@ -142,15 +188,24 @@ export function applyLocale(locale: Locale): void {
     document.documentElement.lang = locale;
     document.title = translateValue("Meteo Data Dashboard", locale);
     if (document.body) translateRoot(document.body);
-  } finally { applying = false; }
+  } finally {
+    applying = false;
+  }
 }
 
-export function getActiveLocale(): Locale { return activeLocale; }
+export function getActiveLocale(): Locale {
+  return activeLocale;
+}
 
 export function formatHour(hour: string): string {
   const d = new Date(hour + ":00Z");
   if (Number.isNaN(d.getTime())) return hour;
-  return d.toLocaleString(activeLocale === "pt-BR" ? "pt-BR" : activeLocale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(activeLocale === "pt-BR" ? "pt-BR" : activeLocale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /**
@@ -163,15 +218,20 @@ export function startObserver(): () => void {
   if (typeof document === "undefined" || !document.body) return () => undefined;
   observer?.disconnect();
   observer = new MutationObserver((mutations) => {
-// Register unknown text as source or detect real React updates.
-        // The equality guard prevents our own translations from being mistaken
-        // for new source text (the bug that was fixed in this module).
+    // Register unknown text as source or detect real React updates.
+    // The equality guard prevents our own translations from being mistaken
+    // for new source text (the bug that was fixed in this module).
     if (applying) return;
     for (const mutation of mutations) {
       if (mutation.type === "characterData") {
         const text = mutation.target as Text;
-        if (!originalText.has(text)) originalText.set(text, text.nodeValue ?? "");
-        else if (text.nodeValue !== translateValue(originalText.get(text) ?? "", activeLocale)) originalText.set(text, text.nodeValue ?? "");
+        if (!originalText.has(text))
+          originalText.set(text, text.nodeValue ?? "");
+        else if (
+          text.nodeValue !==
+          translateValue(originalText.get(text) ?? "", activeLocale)
+        )
+          originalText.set(text, text.nodeValue ?? "");
         schedule(mutation.target);
       } else {
         for (const node of mutation.addedNodes) schedule(node);
@@ -179,16 +239,26 @@ export function startObserver(): () => void {
       }
     }
   });
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
   applyLocale(activeLocale);
   return () => {
-    observer?.disconnect(); observer = null;
+    observer?.disconnect();
+    observer = null;
     if (frame !== null) window.cancelAnimationFrame(frame);
-    frame = null; pending.clear();
+    frame = null;
+    pending.clear();
   };
 }
 
-interface I18nContextValue { locale: Locale; setLocale: (locale: Locale) => void; t: (value: string) => string; }
+interface I18nContextValue {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  t: (value: string) => string;
+}
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
@@ -196,11 +266,22 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
     activeLocale = next;
-    if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, next);
+    try {
+      if (typeof window !== "undefined")
+        window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      /* Session-only locale. */
+    }
     applyLocale(next);
   }, []);
-  useLayoutEffect(() => { activeLocale = locale; return startObserver(); }, []);
-  const value = useMemo<I18nContextValue>(() => ({ locale, setLocale, t: (value: string) => value }), [locale, setLocale]);
+  useLayoutEffect(() => {
+    activeLocale = locale;
+    return startObserver();
+  }, []);
+  const value = useMemo<I18nContextValue>(
+    () => ({ locale, setLocale, t: (value: string) => value }),
+    [locale, setLocale],
+  );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

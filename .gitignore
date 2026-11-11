@@ -6,3 +6,6 @@ dashboard/node_modules/
 .dev.vars
 *.log
 .DS_Store
+
+dashboard/test-results/
+dashboard/playwright-report/

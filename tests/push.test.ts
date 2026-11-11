@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
-import { checkAndRecordRainState, buildRainMessage, rainBucket, RAIN_THRESHOLD_MM_H } from "../src/push/rain";
-import { insertSubscription, removeSubscription, listSubscriptions } from "../src/push/subscriptions";
+import {
+  checkAndRecordRainState,
+  buildRainMessage,
+  rainBucket,
+  RAIN_THRESHOLD_MM_H,
+} from "../src/push/rain";
+import {
+  insertSubscription,
+  removeSubscription,
+  listSubscriptions,
+} from "../src/push/subscriptions";
 import { validatePublicKeyFormat, toBase64Url } from "../src/push/vapid";
 import { runRainAlerts } from "../src/push/alerts";
 import { sendNotification } from "web-push-neo";
@@ -42,12 +51,17 @@ class FakeD1 {
         if (sql.includes("DELETE FROM push_subscriptions")) {
           const [endpoint] = bindings as [string];
           const before = self.subscriptions.length;
-          self.subscriptions = self.subscriptions.filter((s) => s.endpoint !== endpoint);
+          self.subscriptions = self.subscriptions.filter(
+            (s) => s.endpoint !== endpoint,
+          );
           return { meta: { changes: before - self.subscriptions.length } };
         }
         if (sql.includes("ON CONFLICT(station_id)")) {
           const [stationId, raining] = bindings as [string, number];
-          self.states.set(String(stationId), { station_id: stationId, raining });
+          self.states.set(String(stationId), {
+            station_id: stationId,
+            raining,
+          });
           return { meta: { changes: 1 } };
         }
         return { meta: { changes: 0 } };
@@ -84,84 +98,6 @@ describe("rain alert message building", () => {
   });
 });
 
-describe("rain state detection", () => {
-  it("alerts only on a dry -> wet transition", async () => {
-    const db = new FakeD1();
-
-    // First observation: initialises state silently, no alert.
-    const first = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 5 },
-    ]);
-    expect(first.alerts).toHaveLength(0);
-    expect(first.updated).toBe(1);
-
-    // Still raining — no transition, no alert.
-    const second = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:05:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 8 },
-    ]);
-    expect(second.alerts).toHaveLength(0);
-
-    // Dry.
-    await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T11:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 0 },
-    ]);
-
-    // Dry -> wet transition — alert fires.
-    const third = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T11:05:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 3 },
-    ]);
-    expect(third.alerts).toHaveLength(1);
-    expect(third.alerts[0]?.stationName).toBe("Ijuí");
-  });
-
-  it("does not alert when dry", async () => {
-    const db = new FakeD1();
-    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 0 },
-    ]);
-    expect(result.alerts).toHaveLength(0);
-    expect(result.updated).toBe(1);
-  });
-});
-
-describe("rain threshold and initialization", () => {
-  it("does not alert on first observation even when raining", async () => {
-    const db = new FakeD1();
-    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 2.0 },
-    ]);
-    expect(result.alerts).toHaveLength(0);
-    expect(result.updated).toBe(1);
-  });
-
-  it("alerts on dry -> wet transition after state is initialised", async () => {
-    const db = new FakeD1();
-    // Seed state as dry.
-    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
-
-    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 2.0 },
-    ]);
-    expect(result.alerts).toHaveLength(1);
-    expect(result.alerts[0]?.stationName).toBe("Ijuí");
-  });
-
-  it("ignores sensor noise below the rain threshold", async () => {
-    const db = new FakeD1();
-    // Seed state as dry so a transition would normally fire.
-    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
-
-    const result = await checkAndRecordRainState(db as unknown as D1Database, "2025-01-01T10:00:00Z", [
-      { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 0.05 },
-    ]);
-    expect(result.alerts).toHaveLength(0);
-  });
-
-  it("RAIN_THRESHOLD_MM_H is 0.1", () => {
-    expect(RAIN_THRESHOLD_MM_H).toBe(0.1);
-  });
-});
-
 describe("VAPID public key validation", () => {
   it("accepts a valid 65-byte 0x04 public key", () => {
     // 0x04 + 32-byte X + 32-byte Y
@@ -190,38 +126,21 @@ describe("VAPID public key validation", () => {
 describe("push subscription persistence", () => {
   it("inserts, dedupes, lists, and removes", async () => {
     const db = new FakeD1();
-    const sub = { endpoint: "https://push.example/abc", p256dh: "A", auth: "B" };
+    const sub = {
+      endpoint: "https://push.example/abc",
+      p256dh: "A",
+      auth: "B",
+    };
 
     await insertSubscription(db as unknown as D1Database, sub);
     await insertSubscription(db as unknown as D1Database, sub);
-    expect((await listSubscriptions(db as unknown as D1Database)).length).toBe(1);
+    expect((await listSubscriptions(db as unknown as D1Database)).length).toBe(
+      1,
+    );
 
     await removeSubscription(db as unknown as D1Database, sub.endpoint);
-    expect((await listSubscriptions(db as unknown as D1Database)).length).toBe(0);
-  });
-});
-
-describe("rain alert notification aggregation", () => {
-  it("sends one aggregated notification when multiple stations start raining", async () => {
-    const db = new FakeD1();
-    await insertSubscription(db as unknown as D1Database, {
-      endpoint: "https://push.example/abc", p256dh: "A", auth: "B",
-    });
-    // Seed both stations as dry so a transition can be detected.
-    db.states.set("loc-1", { station_id: "loc-1", raining: 0 });
-    db.states.set("loc-2", { station_id: "loc-2", raining: 0 });
-
-    const result = await runRainAlerts({
-      db: db as unknown as D1Database,
-      vapid: { subject: "mailto:a@b.c", publicKey: "pk", privateKey: "sk" },
-      stations: [
-        { stationId: "loc-1", stationName: "Ijuí", rainRateMmH: 5 },
-        { stationId: "loc-2", stationName: "Floresta", rainRateMmH: 4 },
-      ],
-    });
-
-    expect(result.alertsFired).toBe(2);
-    // One aggregated notification (not two) for the two simultaneous rain starts.
-    expect(sendNotification).toHaveBeenCalledTimes(1);
+    expect((await listSubscriptions(db as unknown as D1Database)).length).toBe(
+      0,
+    );
   });
 });

@@ -1,280 +1,458 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from "recharts";
-import { fetchAggregates, fetchStations } from "./api";
-import { fetchForecast } from "./forecast";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+const WeatherChart = lazy(() => import("./WeatherChart"));
+import LanguageSelector from "./LanguageSelector";
 import NotificationSettings from "./NotificationSettings";
+import { useMessages, type MessageKey } from "./messages";
+import { useResource } from "./useResource";
+import { rainStatus, upcoming, type Summary } from "./weather";
+import { timestamp } from "../../shared/weather";
 import type { AggregateResponse, ForecastResponse, Station } from "./types";
-
-const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
-
-interface VarDef { key: string; label: string; unit: string; }
-
-const CHART_VARIABLES: VarDef[] = [
-  { key: "temperature_avg", label: "Temperature", unit: "°C" },
-  { key: "humidity_avg", label: "Humidity", unit: "%" },
-  { key: "solar_radiation_avg", label: "Solar radiation", unit: "W/m²" },
-  { key: "uv_index_avg", label: "UV index", unit: "" },
-  { key: "precipitation_rate_avg", label: "Precip. rate", unit: "mm/h" },
-  { key: "precipitation_total_avg", label: "Precip. total", unit: "mm" },
+const HOURS = [6, 12, 24, 48, 72, 168];
+const VARIABLES: Array<[MessageKey, string]> = [
+  ["temperature", "°C"],
+  ["humidity", "%"],
+  ["precipitation_rate", "mm/h"],
+  ["precipitation_total", "mm"],
+  ["wind_speed", "km/h"],
+  ["wind_gust", "km/h"],
+  ["wind_direction", "°"],
+  ["pressure", "hPa"],
+  ["solar_radiation", "W/m²"],
+  ["uv_index", ""],
+  ["cloud_cover", "%"],
+  ["visibility", "km"],
 ];
-
-const SUMMARY_VARIABLES: VarDef[] = [
-  ...CHART_VARIABLES,
-  { key: "pressure_avg", label: "Pressure", unit: "hPa" },
-  { key: "wind_speed_avg", label: "Wind speed", unit: "km/h" },
-  { key: "wind_gust_avg", label: "Wind gust", unit: "km/h" },
-  { key: "wind_direction_avg", label: "Wind direction", unit: "°" },
-];
-
-const OPTIONAL_CHART_VARIABLES: VarDef[] = [{ key: "pressure_avg", label: "Pressure", unit: "hPa" }];
-const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#00C49F", "#FF8042"];
-
-function formatHour(hour: string): string {
-  const d = new Date(hour + ":00Z");
-  if (Number.isNaN(d.getTime())) return hour;
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function forecastHourKey(time: string): string {
-  const prefix = time.slice(0, 13);
-  return `${prefix.slice(0, 10)} ${prefix.slice(11, 13)}:00`;
-}
-
-function forecastLineFor(variableKey: string): { label: string; color: string } | null {
-  switch (variableKey) {
-    case "temperature_avg": return { label: "Temperature Forecast", color: COLORS[3] };
-    case "humidity_avg": return { label: "Humidity Forecast", color: COLORS[1] };
-    case "cloud_cover_avg": return { label: "Cloud Cover Forecast", color: COLORS[4] };
-    case "pressure_avg": return { label: "Pressure Forecast", color: COLORS[5] };
-    case "wind_speed_avg": return { label: "Wind Speed Forecast", color: COLORS[2] };
-    case "precipitation_rate_avg": return { label: "Precip. Rate Forecast", color: COLORS[0] };
-    case "precipitation_total_avg": return { label: "Precipitation Forecast", color: COLORS[0] };
-    default: return null;
-  }
-}
-
-function bearingToLabel(deg: number | null): string {
-  if (deg === null) return "–";
-  const dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-  return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16] ?? "–";
-}
-
-interface Category { label: string; color: string; }
-function humidityCategory(v: number): Category {
-  if (v < 30) return { label: "Dry", color: "#e0b94f" };
-  if (v < 60) return { label: "Comfortable", color: "#82ca9d" };
-  if (v < 80) return { label: "Humid", color: "#42a5f5" };
-  return { label: "Very Humid", color: "#7e57c2" };
-}
-const UV_TIERS: { max: number; label: string; color: string }[] = [
-  { max: 2, label: "Low", color: "#4caf50" }, { max: 5, label: "Moderate", color: "#ffb300" },
-  { max: 7, label: "High", color: "#fb8c00" }, { max: 10, label: "Very High", color: "#e53935" },
-  { max: Infinity, label: "Extreme", color: "#7e57c2" },
-];
-function uvInfo(v: number): { label: string; color: string; index: number } {
-  let idx = 0;
-  for (let i = 0; i < UV_TIERS.length; i++) if (v <= UV_TIERS[i]!.max) { idx = i; break; }
-  const t = UV_TIERS[idx] ?? UV_TIERS[UV_TIERS.length - 1]!;
-  return { label: t.label, color: t.color, index: idx };
-}
-function solarCategory(v: number): Category {
-  if (v <= 100) return { label: "Very Low", color: "#90a4ae" };
-  if (v <= 300) return { label: "Low", color: "#42a5f5" };
-  if (v <= 600) return { label: "Moderate", color: "#ffb300" };
-  if (v <= 900) return { label: "High", color: "#fb8c00" };
-  return { label: "Very High", color: "#e53935" };
-}
-function precipCategory(v: number): Category {
-  if (v <= 0) return { label: "Dry", color: "#82ca9d" };
-  if (v < 2.5) return { label: "Drizzle", color: "#42a5f5" };
-  if (v < 10) return { label: "Rain", color: "#1e88e5" };
-  if (v < 50) return { label: "Heavy Rain", color: "#3949ab" };
-  return { label: "Storm", color: "#7e57c2" };
-}
-function windSpeedCategory(v: number): Category {
-  if (v <= 5) return { label: "Calm", color: "#82ca9d" };
-  if (v <= 20) return { label: "Light", color: "#42a5f5" };
-  if (v <= 40) return { label: "Moderate", color: "#ffb300" };
-  if (v <= 60) return { label: "Strong", color: "#fb8c00" };
-  return { label: "Very Strong", color: "#e53935" };
-}
-function tempColor(v: number): string {
-  if (v <= 0) return "#2196f3";
-  if (v < 15) return "#4caf50";
-  if (v < 25) return "#ffb300";
-  return "#e53935";
-}
-function SVGArc({ pct, color }: { pct: number; color: string }) {
-  const r = 34, c = 2 * Math.PI * r, filled = Math.max(0, Math.min(100, pct));
-  return <svg viewBox="0 0 96 96" className="ring"><circle cx="48" cy="48" r={r} fill="none" stroke="#e4e7eb" strokeWidth="10" /><circle cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${(filled / 100) * c} ${c}`} transform="rotate(-90 48 48)" /></svg>;
-}
-
-export default function App() {
-  const [stations, setStations] = useState<Station[]>([]);
-  const [selected, setSelected] = useState<string>("");
-  const [hours, setHours] = useState<number>(24);
-  const [showPressure, setShowPressure] = useState<boolean>(false);
-  const [data, setData] = useState<AggregateResponse | null>(null);
-  const [forecast, setForecast] = useState<ForecastResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const aggregateInFlight = useRef(false);
-  const forecastInFlight = useRef(false);
-
-  useEffect(() => {
-    fetchStations(24).then(setStations).catch((e) => setError(String(e)));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    // Fetch once per mount (first load / browser refresh) and whenever the
-    // user changes a filter. No polling: an idle tab generates zero queries
-    // (D1 read conservation, see docs/emergency-d1-mode.md).
-    const refresh = async () => {
-      if (cancelled || aggregateInFlight.current) return;
-      aggregateInFlight.current = true;
-      setError(null);
-      try {
-        const next = await fetchAggregates({ hours, station: selected || undefined });
-        if (!cancelled) setData(next);
-      } catch (e) {
-        if (!cancelled) setError(String(e));
-      } finally {
-        aggregateInFlight.current = false;
-      }
-    };
-    void refresh();
-    return () => {
-      cancelled = true;
-    };
-  }, [hours, selected]);
-
-  useEffect(() => {
-    let cancelled = false;
-    // Same policy as aggregates: fetch once per mount, no polling.
-    const refresh = async () => {
-      if (cancelled || forecastInFlight.current) return;
-      forecastInFlight.current = true;
-      try {
-        const next = await fetchForecast();
-        if (!cancelled && next) setForecast(next);
-      } finally {
-        forecastInFlight.current = false;
-      }
-    };
-    void refresh();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const stationNames = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of stations) map.set(s.id, s.name);
-    return map;
-  }, [stations]);
-  const dataByStation = useMemo(() => {
-    const map = new Map<string, Map<string, AggregateResponse["rows"][number]>>();
-    for (const row of data?.rows ?? []) {
-      let byHour = map.get(row.station_id);
-      if (!byHour) { byHour = new Map(); map.set(row.station_id, byHour); }
-      byHour.set(row.hour, row);
-    }
-    return map;
-  }, [data]);
-  const sortedHours = useMemo(() => Array.from(new Set((data?.rows ?? []).map((r) => r.hour))).sort(), [data]);
-  const forecastByHour = useMemo(() => {
-    const map = new Map<string, ForecastResponse["hourly"][number]>();
-    for (const h of forecast?.hourly ?? []) map.set(forecastHourKey(h.time), h);
-    return map;
-  }, [forecast]);
-  const futureForecastHours = useMemo(() => {
-    const latestObserved = sortedHours[sortedHours.length - 1];
-    const result = Array.from(forecastByHour.keys()).filter((h) => latestObserved ? h > latestObserved : true);
-    result.sort(); return result;
-  }, [forecastByHour, sortedHours]);
-  const chartHours = useMemo(() => [...sortedHours, ...futureForecastHours], [sortedHours, futureForecastHours]);
-  const forecastValueFor = (hour: string, variableKey: string): number | null => {
-    const entry = forecastByHour.get(hour); if (!entry) return null;
-    let value: number | null | undefined = null;
-    if (variableKey === "temperature_avg") value = entry.temperature;
-    else if (variableKey === "humidity_avg") value = entry.humidity;
-    else if (variableKey === "cloud_cover_avg") value = entry.cloudCover;
-    else if (variableKey === "pressure_avg") value = entry.surfacePressure ?? null;
-    else if (variableKey === "wind_speed_avg") value = entry.windSpeed ?? null;
-    else if (variableKey === "precipitation_rate_avg" || variableKey === "precipitation_total_avg") value = entry.precipitation;
-    if (typeof value !== "number") return null;
-    return Math.round(value * 100) / 100;
+function selection() {
+  const q = new URLSearchParams(location.search);
+  return {
+    station: q.get("station") ?? "",
+    hours: HOURS.includes(Number(q.get("hours"))) ? Number(q.get("hours")) : 24,
+    notice: q.get("stations")?.split(",") ?? [],
   };
-  const forecastSummary = useMemo(() => {
-    const hourly = forecast?.hourly ?? []; if (hourly.length === 0) return null;
-    const current = hourly[0]!, next6 = hourly.slice(0, 6), next24 = hourly.slice(0, 24);
-    const rainProb = Math.max(0, ...next6.map((h) => h.precipitationProbability));
-    const temps = next24.map((h) => h.temperature);
-    return { currentTemp: current.temperature, rainProb, maxTemp: Math.max(...temps), minTemp: Math.min(...temps) };
-  }, [forecast]);
-  const visibleStationIds = useMemo(() => {
-    const ids = new Set((data?.rows ?? []).map((r) => r.station_id));
-    if (selected) return ids.has(selected) ? [selected] : [];
-    return Array.from(ids);
-  }, [data, selected]);
-  const latest = useMemo(() => {
-    const rows = data?.rows ?? []; if (rows.length === 0) return null;
-    const latestHour = rows.reduce((max, r) => r.hour > max ? r.hour : max, rows[0]!.hour);
-    const atHour = rows.filter((r) => r.hour === latestHour); if (atHour.length === 0) return null;
-    const keys = ["temperature_avg", "humidity_avg", "solar_radiation_avg", "uv_index_avg", "precipitation_rate_avg", "precipitation_total_avg", "pressure_avg", "wind_speed_avg", "wind_gust_avg", "wind_direction_avg"];
-    const values: Record<string, number | null> = {};
-    for (const key of keys) {
-      const nums = atHour.map((r) => r[key as keyof AggregateResponse["rows"][number]] as number | null).filter((v): v is number => typeof v === "number");
-      values[key] = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
-    }
-    return { hour: latestHour, stationCount: atHour.length, values };
-  }, [data]);
-  const tempRange = useMemo(() => {
-    const temps = (data?.rows ?? []).map((r) => r.temperature_avg).filter((v): v is number => typeof v === "number");
-    return temps.length === 0 ? null : { min: Math.min(...temps), max: Math.max(...temps) };
-  }, [data]);
-  const pressureTrend = useMemo(() => {
-    const rows = data?.rows ?? []; if (rows.length < 2) return "stable";
-    const latestVal = latest?.values.pressure_avg ?? null;
-    const others = rows.flatMap((r) => r.hour !== latest?.hour ? [r.pressure_avg] : []).filter((v): v is number => typeof v === "number");
-    if (latestVal === null || others.length === 0) return "stable";
-    const diff = latestVal - others.reduce((a, b) => a + b, 0) / others.length;
-    return diff > 0.5 ? "rising" : diff < -0.5 ? "falling" : "stable";
-  }, [data, latest]);
-  const chartVariables = useMemo(() => showPressure ? [...CHART_VARIABLES, ...OPTIONAL_CHART_VARIABLES] : [...CHART_VARIABLES], [showPressure]);
-  const current = latest?.values ?? null;
-
+}
+export default function App() {
+  const { locale, t } = useMessages();
+  const [filters, setFilters] = useState(selection);
+  const [refresh, setRefresh] = useState(0);
+  const [newNotice, setNewNotice] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  const [variable, setVariable] = useState<MessageKey>("temperature");
+  const stations = useResource<{ stations: Station[] }>(
+    "/api/stations?includeInactive=true",
+    refresh,
+  );
+  const summary = useResource<{
+    summaries: Summary[];
+    meta?: { serverTime: string };
+  }>("/api/summary", refresh);
+  const aggregate = useResource<AggregateResponse>(
+    `/api/observations/aggregate?hours=${filters.hours}&station=${encodeURIComponent(filters.station)}`,
+    refresh,
+  );
+  const forecast = useResource<ForecastResponse>("/api/forecast", refresh);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const back = () => setFilters(selection());
+    window.addEventListener("popstate", back);
+    if (location.hash === "#chuva") document.getElementById("chuva")?.focus();
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("popstate", back);
+    };
+  }, []);
+  useEffect(() => {
+    const receive = (event: MessageEvent) => {
+      if (
+        event.source === navigator.serviceWorker.controller &&
+        event.data?.type === "meteo-notification"
+      )
+        setNewNotice(true);
+    };
+    navigator.serviceWorker?.addEventListener("message", receive);
+    return () =>
+      navigator.serviceWorker?.removeEventListener("message", receive);
+  }, []);
+  const update = (next: typeof filters) => {
+    const q = new URLSearchParams(location.search);
+    next.station ? q.set("station", next.station) : q.delete("station");
+    q.set("hours", String(next.hours));
+    q.delete("stations");
+    history.pushState(null, "", `?${q}${location.hash}`);
+    setFilters({ ...next, notice: [] });
+  };
+  const catalog =
+    stations.data?.stations ??
+    summary.data?.summaries.map((s) => ({
+      id: s.location_id,
+      name: s.station_name,
+      source_id: "",
+    })) ??
+    [];
+  const invalid =
+    !!filters.station &&
+    !catalog.some((s) => s.id === filters.station) &&
+    (!!stations.data || !!summary.data);
+  const observed: Summary[] = summary.data
+    ? catalog
+        .filter((s) => !filters.station || s.id === filters.station)
+        .map(
+          (s) =>
+            summary.data!.summaries.find((row) => row.location_id === s.id) ?? {
+              location_id: s.id,
+              station_name: s.name,
+              observed_at: "",
+              precipitation_rate: null,
+            },
+        )
+    : [];
+  const serverOffset = summary.data?.meta
+    ? timestamp(summary.data.meta.serverTime) - summary.updated
+    : 0;
+  const clock = now + serverOffset;
+  const valid = observed.filter((s) =>
+    ["rain", "dry"].includes(rainStatus(s, clock)),
+  );
+  const raining = valid.filter((s) => rainStatus(s, clock) === "rain");
+  const number = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v)
+      ? new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(v)
+      : "—";
+  const date = (v: string) =>
+    Number.isFinite(timestamp(v))
+      ? new Date(timestamp(v)).toLocaleString(locale, {
+          timeZone: "America/Sao_Paulo",
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "—";
+  const rate = (v: unknown) =>
+    typeof v === "number" && v > 0 && v < 0.1 ? `< ${number(0.1)}` : number(v);
+  const visible = catalog.filter(
+    (s) => !filters.station || s.id === filters.station,
+  );
+  const chart = useMemo(() => {
+    const end = Math.floor((aggregate.updated || now) / 3600000) * 3600000;
+    const rows = aggregate.data?.rows ?? [];
+    return Array.from({ length: filters.hours + 1 }, (_, i) => {
+      const time = end - (filters.hours - i) * 3600000;
+      const point: Record<string, string | number | null> = { time };
+      for (const s of visible) {
+        const row = rows.find(
+          (r) => r.station_id === s.id && timestamp(r.hour) === time,
+        );
+        point[s.id] =
+          (row?.[`${variable}_avg` as keyof typeof row] as number) ?? null;
+      }
+      return point;
+    });
+  }, [
+    aggregate.data,
+    aggregate.updated,
+    filters.hours,
+    filters.station,
+    stations.data,
+    summary.data,
+    variable,
+  ]);
+  const six = upcoming(forecast.data?.hourly ?? [], clock, 6),
+    day = upcoming(forecast.data?.hourly ?? [], clock, 24);
+  const unit = VARIABLES.find((v) => v[0] === variable)?.[1];
+  const status = (resource: { loading: boolean; error: number | null }) =>
+    resource.loading ? (
+      <p role="status">{t("loading")}</p>
+    ) : resource.error ? (
+      <p role="alert">{t(resource.error === 503 ? "maintenance" : "error")}</p>
+    ) : null;
   return (
-    <div className="app">
-      <header className="header"><h1>Meteo Data Dashboard</h1><div className="controls">
-        <label>Station<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">All stations</option>{stations.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.id})</option>)}</select></label>
-        <label>Range<select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{HOUR_OPTIONS.map((h) => <option key={h} value={h}>{h} hours</option>)}</select></label>
-        <label className="toggle"><input type="checkbox" checked={showPressure} onChange={(e) => setShowPressure(e.target.checked)} />Show pressure</label>
-      </div></header>
-      <NotificationSettings onError={setError} />
-      {error && <div className="error">{error}</div>}
-      {!data && !error && <div className="loading">Loading…</div>}
-      {data && <main>
-        <section className="summary" aria-label="Latest readings"><div className="summary-grid">
-          <div className="summary-card gauge-card"><span className="summary-label">🌡 Temperature</span>{current?.temperature_avg != null && tempRange ? <div className="thermometer"><div className="therm-rail"><div className="therm-fill" style={{ height: `${((current.temperature_avg - tempRange.min) / (tempRange.max - tempRange.min || 1)) * 100}%` }} /><div className="therm-bulb" style={{ background: tempColor(current.temperature_avg) }} /></div><div className="therm-labels"><span>{tempRange.max.toFixed(0)}°</span><span className="therm-current" style={{ color: tempColor(current.temperature_avg) }}>{current.temperature_avg.toFixed(1)}°</span><span>{tempRange.min.toFixed(0)}°</span></div></div> : <span className="summary-value">–</span>}</div>
-          {forecast && forecast.hourly.length > 0 && forecastSummary && <div className="summary-card forecast-card"><span className="summary-label">📡 Forecast</span><div className="forecast-temp">{forecastSummary.currentTemp.toFixed(1)}°C</div><div className="forecast-detail">Rain next 6h: {forecastSummary.rainProb.toFixed(0)}%</div><div className="forecast-detail">Today: {forecastSummary.minTemp.toFixed(0)}° / {forecastSummary.maxTemp.toFixed(0)}°</div><div className="forecast-attribution">Forecast provided by Open-Meteo</div></div>}
-          <div className="summary-card gauge-card"><span className="summary-label">💧 Humidity</span>{current?.humidity_avg != null ? <div className="ring-wrap"><SVGArc pct={current.humidity_avg} color={humidityCategory(current.humidity_avg).color} /><div className="ring-value">{current.humidity_avg.toFixed(0)}%</div><div className="ring-label" style={{ color: humidityCategory(current.humidity_avg).color }}>{humidityCategory(current.humidity_avg).label}</div></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card gauge-card"><span className="summary-label">☀ UV Index</span>{current?.uv_index_avg != null ? <div className="uv-wrap"><div className="uv-scale"><div className="uv-track">{UV_TIERS.map((t) => <span key={t.label} className="uv-seg" style={{ background: t.color }} />)}<span className="uv-marker" style={{ left: `${Math.min(100, (current.uv_index_avg! / 11) * 100)}%` }} /></div><div className="uv-labels">{["0", "2", "5", "7", "10", "11+"].map((t) => <span key={t}>{t}</span>)}</div></div><div className="uv-value" style={{ color: uvInfo(current.uv_index_avg!).color }}>{current.uv_index_avg.toFixed(1)} · {uvInfo(current.uv_index_avg!).label}</div></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card gauge-card"><span className="summary-label">☀ Solar radiation</span>{current?.solar_radiation_avg != null ? <div className="solar-wrap"><div className="bar-track"><div className="bar-fill" style={{ width: `${Math.min(100, (current.solar_radiation_avg / 900) * 100)}%`, background: solarCategory(current.solar_radiation_avg).color }} /></div><div className="bar-value">{current.solar_radiation_avg.toFixed(0)} W/m²</div><div className="bar-label" style={{ color: solarCategory(current.solar_radiation_avg).color }}>{solarCategory(current.solar_radiation_avg).label}</div></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card gauge-card"><span className="summary-label">🌧 Rain</span>{current?.precipitation_rate_avg != null ? <div className="precip-wrap"><div className="precip-status" style={{ color: precipCategory(current.precipitation_rate_avg).color }}>{precipCategory(current.precipitation_rate_avg).label}</div><div className="precip-value">{current.precipitation_rate_avg.toFixed(1)} mm/h</div></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card"><span className="summary-label">💨 Wind</span>{current?.wind_speed_avg != null ? <div className="wind-wrap"><div className="wind-main"><span className="wind-value">{current.wind_speed_avg.toFixed(1)}</span><span className="wind-unit">km/h</span>{current.wind_direction_avg != null && <span className="wind-dir" title={`${current.wind_direction_avg.toFixed(0)}°`}>{bearingGlyph(current.wind_direction_avg)} {bearingToLabel(current.wind_direction_avg)}</span>}</div><div className="wind-cat" style={{ color: windSpeedCategory(current.wind_speed_avg).color }}>{windSpeedCategory(current.wind_speed_avg).label}</div></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card"><span className="summary-label">🌡 Pressure</span>{current?.pressure_avg != null ? <div className="pressure-wrap"><span className="pressure-value">{current.pressure_avg.toFixed(1)} hPa</span><span className="pressure-trend">{pressureTrendArrow(pressureTrend)}</span><span className="pressure-label">{pressureTrendLabel(pressureTrend)}</span></div> : <span className="summary-value">–</span>}</div>
-          <div className="summary-card"><span className="summary-label">🌧 Today</span>{current?.precipitation_total_avg != null ? <div className="today-value">{current.precipitation_total_avg.toFixed(1)} mm</div> : <span className="summary-value">–</span>}</div>
-        </div>{latest && <div className="summary-caption">Average of latest readings · {formatHour(latest.hour)} · {latest.stationCount} {latest.stationCount === 1 ? "station" : "stations"}</div>}</section>
-        <section className="chart-card"><h2>Wind</h2><div className="wind-row">{visibleStationIds.map((sid) => { const latestRow = dataByStation.get(sid)?.get(sortedHours[sortedHours.length - 1] ?? ""); const dir = latestRow?.wind_direction_avg ?? null; const speed = latestRow?.wind_speed_avg ?? null; const gust = latestRow?.wind_gust_avg ?? null; return <div key={sid} className="wind-item"><div className="station-label">{stationNames.get(sid) ?? sid}</div><div className="compass"><span className="compass-n">N</span><span className="compass-e">E</span><span className="compass-s">S</span><span className="compass-w">W</span><span className="compass-arrow" style={{ transform: `translate(-50%, -50%) rotate(${dir !== null ? (dir % 360) + 180 : 0}deg)` }} title={`${dir !== null ? dir.toFixed(0) + "°" : "no data"}`}>↑</span></div><div className="wind-speed">{speed !== null ? `${Number(speed).toFixed(1)} km/h` : "–"}{gust !== null ? ` · gust ${Number(gust).toFixed(1)} km/h` : ""}<span className="wind-direction">{dir !== null ? `${dir.toFixed(0)}° ${bearingToLabel(dir)}` : ""}</span></div></div>; })}</div></section>
-        {chartVariables.map((v) => <section key={v.key} className="chart-card"><h2>{v.label} ({v.unit})</h2><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartHours.map((hour) => { const point: Record<string, unknown> = { hour: formatHour(hour) }; for (const sid of visibleStationIds) { const raw = dataByStation.get(sid)?.get(hour)?.[v.key as keyof AggregateResponse["rows"][number]] ?? null; point[sid] = typeof raw === "number" ? Math.round(raw * 100) / 100 : raw; } point.forecast = forecastValueFor(hour, v.key); return point; })}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="hour" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} width={45} /><Tooltip /><Legend />{visibleStationIds.map((sid, i) => <Line key={sid} type="monotone" dataKey={sid} name={stationNames.get(sid) ?? sid} stroke={COLORS[i % COLORS.length]} dot={false} connectNulls />)}{forecast && forecastLineFor(v.key) && <Line key="forecast" type="monotone" dataKey="forecast" name={forecastLineFor(v.key)!.label} stroke={forecastLineFor(v.key)!.color} strokeDasharray="5 5" dot={false} connectNulls={false} />}</LineChart></ResponsiveContainer></div></section>)}
-        <section className="chart-card"><h2>Latest hourly averages</h2><div className="table-wrap"><table><thead><tr><th>Station</th><th>Hour</th>{SUMMARY_VARIABLES.map((v) => <th key={v.key}>{v.label}</th>)}</tr></thead><tbody>{data?.rows.slice().sort((a, b) => b.hour.localeCompare(a.hour)).slice(0, visibleStationIds.length * 2).map((row, i) => <tr key={i}><td>{stationNames.get(row.station_id) ?? row.station_id}</td><td>{formatHour(row.hour)}</td>{SUMMARY_VARIABLES.map((v) => <td key={v.key}>{row[v.key as keyof AggregateResponse["rows"][number]] !== null ? Number(row[v.key as keyof AggregateResponse["rows"][number]]).toFixed(1) : "–"}</td>)}</tr>)}</tbody></table></div></section>
-      </main>}
+    <div className="app" data-i18n-ignore>
+      <a className="skip-link" href="#chuva">
+        {t("skip")}
+      </a>
+      <header className="header">
+        <div className="brand">
+          <span className="brand-icon" aria-hidden="true">
+            ☂
+          </span>
+          <div>
+            <h1>Meteo Data</h1>
+            <p>{t("subtitle")} · Ijuí, RS</p>
+          </div>
+        </div>
+        <LanguageSelector />
+      </header>
+      <div className="toolbar">
+        <label>
+          {t("station")}
+          <select
+            value={filters.station}
+            onChange={(e) => update({ ...filters, station: e.target.value })}
+          >
+            <option value="">{t("all")}</option>
+            {invalid && (
+              <option value={filters.station}>{filters.station}</option>
+            )}
+            {catalog.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={() => {
+            setNewNotice(false);
+            setRefresh((n) => n + 1);
+          }}
+          disabled={summary.loading}
+        >
+          {summary.loading ? t("loading") : t("refresh")}
+        </button>
+        <span className="muted">
+          {summary.updated
+            ? `${t("updated")} · ${date(new Date(summary.updated).toISOString())}`
+            : ""}
+        </span>
+      </div>
+      {invalid && <p role="alert">{t("invalidStation")}</p>}
+      {newNotice && <p role="status">{t("newNotice")}</p>}
+      <main>
+        <section
+          id="chuva"
+          tabIndex={-1}
+          className={`rain-hero ${raining.length ? "wet" : ""}`}
+          aria-labelledby="rain-title"
+        >
+          <div className="eyebrow">{t("rainTitle")}</div>
+          <h2 id="rain-title">
+            {summary.loading
+              ? t("loading")
+              : observed.length === 1
+                ? t(rainStatus(observed[0]!, clock))
+                : raining.length
+                  ? `${t("rain")} · ${raining.length} / ${valid.length}`
+                  : valid.length
+                    ? t("dry")
+                    : t("unknown")}
+          </h2>
+          {status({ ...summary, loading: false })}
+          {filters.notice.length > 0 && (
+            <p>
+              {t("fromNotice")}:{" "}
+              {catalog
+                .filter((s) => filters.notice.includes(s.id))
+                .map((s) => s.name)
+                .join(", ")}
+            </p>
+          )}
+          <div className="rain-readings">
+            {observed.map((s) => (
+              <div key={s.location_id}>
+                <strong>{s.station_name}</strong>
+                <span>
+                  {t(rainStatus(s, clock))}
+                  {["rain", "dry"].includes(rainStatus(s, clock))
+                    ? ` · ${rate(s.precipitation_rate)} mm/h`
+                    : ""}
+                </span>
+                <small>
+                  {t("observed")} · {date(s.observed_at)}
+                </small>
+              </div>
+            ))}
+          </div>
+          {!summary.loading && !observed.length && <p>{t("empty")}</p>}
+          {observed.length > 1 && (
+            <p className="muted">
+              {valid.length} {t("recent")} · {observed.length - valid.length}{" "}
+              {t("missing")}
+            </p>
+          )}
+        </section>
+        <NotificationSettings stations={catalog} selected={filters.station} />
+        <section aria-labelledby="current-title">
+          <div className="section-title">
+            <h2 id="current-title">{t("current")}</h2>
+            <span className="muted">America/Sao_Paulo</span>
+          </div>
+          {status(summary)}
+          <div className="conditions-grid">
+            {observed.map((s) => (
+              <article className="card" key={s.location_id}>
+                <h3>{s.station_name}</h3>
+                <p className="muted">
+                  {date(s.observed_at)} · {t(rainStatus(s, clock))}
+                </p>
+                <div className="temperature">
+                  {number(s.temperature)}
+                  <small> °C</small>
+                </div>
+                <dl className="metrics">
+                  {VARIABLES.filter((v) =>
+                    ["humidity", "precipitation_rate", "wind_speed"].includes(
+                      v[0],
+                    ),
+                  ).map(([key, unit]) => (
+                    <div key={key}>
+                      <dt>{t(key)}</dt>
+                      <dd>
+                        {key === "precipitation_rate"
+                          ? rate(s[key])
+                          : number(s[key])}{" "}
+                        <small>{unit}</small>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <details>
+                  <summary>{t("moreReadings")}</summary>
+                  <dl className="metrics">
+                    {VARIABLES.filter(
+                      (v) =>
+                        ![
+                          "temperature",
+                          "humidity",
+                          "precipitation_rate",
+                          "wind_speed",
+                        ].includes(v[0]),
+                    ).map(([key, unit]) => (
+                      <div key={key}>
+                        <dt>{t(key)}</dt>
+                        <dd>
+                          {key === "precipitation_rate"
+                            ? rate(s[key])
+                            : number(s[key])}{" "}
+                          <small>{unit}</small>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="card history">
+          <div className="section-title">
+            <div>
+              <h2>{t("history")}</h2>
+              <p className="muted">{t("averages")}</p>
+            </div>
+            <div className="controls">
+              <label>
+                {t("variable")}
+                <select
+                  value={variable}
+                  onChange={(e) => setVariable(e.target.value as MessageKey)}
+                >
+                  {VARIABLES.map(([key, unit]) => (
+                    <option key={key} value={key}>
+                      {t(key)} {unit}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("hours")}
+                <select
+                  value={filters.hours}
+                  onChange={(e) =>
+                    update({ ...filters, hours: Number(e.target.value) })
+                  }
+                >
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {h} {t("hours")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+          {status(aggregate)}
+          {aggregate.data && !aggregate.data.rows.length && <p>{t("empty")}</p>}
+          {!!aggregate.data?.rows.length && (
+            <>
+              <div
+                className="chart-wrap"
+                aria-label={`${t(variable)} (${unit})`}
+              >
+                <Suspense fallback={<p>{t("loading")}</p>}>
+                  <WeatherChart
+                    points={chart}
+                    stations={visible}
+                    unit={unit}
+                    formatTime={date}
+                  />
+                </Suspense>
+              </div>
+              <details>
+                <summary>{t("table")}</summary>
+                <div className="table-wrap" tabIndex={0}>
+                  <table>
+                    <caption>
+                      {t(variable)} ({unit}) · {t("averages")}
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">{t("time")}</th>
+                        {visible.map((s) => (
+                          <th scope="col" key={s.id}>
+                            {s.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chart.map((row) => (
+                        <tr key={row.time}>
+                          <th scope="row">
+                            {date(new Date(Number(row.time)).toISOString())}
+                          </th>
+                          {visible.map((s) => (
+                            <td key={s.id}>{number(row[s.id])}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </>
+          )}
+        </section>
+        <section className="card">
+          <h2>{t("forecast")}</h2>
+          {status(forecast)}
+          {day.length > 0 ? (
+            <div className="forecast-grid">
+              <div>
+                <p>{t("next6")}</p>
+                <strong>
+                  {six.length
+                    ? number(
+                        Math.max(...six.map((h) => h.precipitationProbability)),
+                      )
+                    : "—"}
+                  %
+                </strong>
+              </div>
+              <div>
+                <p>{t("next24")}</p>
+                <strong>
+                  {number(Math.min(...day.map((h) => h.temperature)))}° /{" "}
+                  {number(Math.max(...day.map((h) => h.temperature)))}°
+                </strong>
+              </div>
+            </div>
+          ) : (
+            !forecast.loading && !forecast.error && <p>{t("empty")}</p>
+          )}
+          <p className="muted">Open-Meteo · America/Sao_Paulo</p>
+        </section>
+      </main>
+      <footer>Meteo Data · Ijuí, Rio Grande do Sul</footer>
     </div>
   );
 }
-function bearingGlyph(deg: number): string { const d = ((deg % 360) + 360) % 360; if (d >= 337.5 || d < 22.5) return "↓"; if (d < 67.5) return "↙"; if (d < 112.5) return "←"; if (d < 157.5) return "↖"; if (d < 202.5) return "↑"; if (d < 247.5) return "↗"; if (d < 292.5) return "→"; return "↘"; }
-function pressureTrendArrow(trend: string): string { return trend === "rising" ? "↗" : trend === "falling" ? "↘" : "→"; }
-function pressureTrendLabel(trend: string): string { return trend === "rising" ? "Rising" : trend === "falling" ? "Falling" : "Stable"; }

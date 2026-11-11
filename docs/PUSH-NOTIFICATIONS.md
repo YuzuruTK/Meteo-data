@@ -1,88 +1,57 @@
-# Anonymous push notifications (rain alerts)
+﻿# Alertas de chuva e Web Push
 
-This project supports anonymous **Web Push** notifications so visitors can subscribe to rain alerts without creating an account. When rain *starts* at a monitored station, subscribers receive a browser notification. Continuous rain does **not** generate repeated alerts.
+O aviso de início significa uma transição entre uma leitura seca recente e uma leitura com taxa ≥ 0,1 mm/h. Não representa a primeira gota física nem uma previsão. As estações são consultadas a cada cinco minutos; entrega depende da fonte, navegador, conexão e sistema operacional.
 
-## How it works
+## Detector e entrega
 
-1. The dashboard shows a **🔔 Rain Alerts** card. Clicking **Subscribe** requests browser notification permission, registers the Service Worker, creates a push subscription, and stores it on the backend (`POST /api/push-subscribe`).
-2. No account is needed — the subscription is identified solely by its push endpoint URL.
-3. On every scheduled collection, the Worker queries the latest precipitation rate per station and compares it with the persisted previous state (`weather_alert_state`).
-4. Only when a station transitions from **dry → raining** does the Worker send a push to all subscribers (`POST` to each push service with VAPID auth).
-5. Subscriptions that return **404/410** (expired/gone) are automatically deleted from D1 to prevent database growth.
+- Bootstrap e recuperação após mais de 15 minutos sem leitura válida são silenciosos.
+- Null, taxa inválida, data repetida, leitura com mais de 15 minutos ou mais de dois minutos no futuro não abrem episódios.
+- Duas leituras secas distintas, separadas por pelo menos cinco minutos, rearmam o detector. Uma leitura seca isolada não cria novo episódio.
+- Estado e evento são gravados no mesmo `D1.batch`, com versão otimista e token da transição vencedora.
+- Eventos simultâneos formam um lote. Preparação de destinatários usa páginas de 100 e cursor persistido; cada dispositivo recebe somente suas estações.
+- Drenagem processa até 50 entregas/ciclo, com concorrência 10, lease de 90 segundos e timeout cancelável de transporte de 20 segundos. A coleta falhar não impede a tentativa de drenar pendências.
+- Máximo de três tentativas, separadas por pelo menos cinco minutos, respeitando `Retry-After`. Evento expira 15 minutos após a observação, sem reiniciar o TTL. Leitura seca posterior, falta de frescor ou preferência removida cancelam o envio.
+- 404/410 removem assinatura; 400/401/403 encerram aquela entrega sem apagar assinaturas em massa. Erros persistidos não contêm endpoints.
+- Pode haver duplicação se o provedor aceitar e o processo cair antes do ACK no D1. Tags estáveis e `renotify:false` reduzem repetição visível; não há garantia exactly-once.
 
-## New database tables (`migrations/0002_push_subscriptions.sql`)
+## Assinatura por dispositivo
 
-- `push_subscriptions` — `endpoint` (PK), `p256dh`, `auth`, `created_at`.
-- `weather_alert_state` — `station_id` (PK), `raining`, `updated_at` (dedupe state).
+A UI apresenta as escolhas antes de pedir permissão. Novas assinaturas ativam somente chuva observada; previsões são opcionais. Preferências do gráfico não alteram as de notificações.
 
-## Endpoints
+V2 usa `version:2`, endpoint/chaves do navegador, `controlToken` aleatório de 32 bytes em base64url e `preferences`:
 
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/push/public-key` | Returns the VAPID public key used to create the subscription. |
-| `POST` | `/api/push-subscribe` | Body `{ endpoint, keys: { p256dh, auth } }` — stores a subscription (idempotent). |
-| `POST` | `/api/push-unsubscribe` | Body `{ endpoint }` — removes a subscription. |
-| `POST` | `/api/push/test` | (Secret-protected) Sends a test notification to all subscribers. Header `x-collector-trigger: <secret>`. |
-
-## Test trigger (send a fake notification)
-
-To verify push delivery end-to-end without waiting for real rain, subscribe on a device (e.g. a real Android phone with Play Services), then send a test notification to all subscribers:
-
-```bash
-curl -X POST https://YOUR_WORKER.workers.dev/api/push/test \
-  -H "x-collector-trigger: YOUR_TRIGGER_SECRET"
+```json
+{"stationScope":"selected","stationIds":["ijui-iiJu3"],"rainStart":true,"rainForecast":false,"temperatureForecast":false,"locale":"pt-BR"}
 ```
 
-The response reports how many notifications were sent, how many expired subscriptions were removed, and any errors:
-`{ "sent": 1, "removed": 0, "errors": [] }`
+O cliente persiste a capacidade antes do POST; o servidor guarda somente SHA-256. Perda de resposta permite repetição idempotente. Status só aparece ativo após confirmação remota. Perda da capacidade exige renovar a assinatura pelo navegador, sem recuperar acesso apenas com endpoint.
 
-## VAPID keys
+Assinaturas antigas permanecem com todas as estações/tipos e inglês. Promoção exige posse das mesmas chaves da assinatura antiga. Após promoção, clientes antigos não podem sobrescrever preferências nem cancelar sem capacidade. Preferências são um documento JSON validado, substituído atomicamente; esta escolha evita uma tabela de relacionamento para o pequeno catálogo atual e é reavaliável se a audiência exigir consultas por estação.
 
-Generate a VAPID key pair:
+| Rota | Contrato |
+| --- | --- |
+| `GET /api/push/public-key` | Chave pública, versão e flag `paused`; 503 se indisponível. |
+| `POST /api/push-subscribe` | Legado ou v2; v2 retorna ID opaco e preferências confirmadas. |
+| `POST /api/push/status` | Endpoint/ID + bearer; legado pode apresentar endpoint e chaves correspondentes para exibir escolhas antes da promoção. |
+| `POST /api/push/preferences` | Endpoint/ID + bearer + preferências completas. |
+| `POST /api/push-unsubscribe` | Endpoint/ID + bearer para v2; idempotente. Legado mantém contrato antigo. |
+| `POST /api/push/test-device` | Endpoint/ID + bearer; somente aquele dispositivo, uma vez/minuto. |
+| `POST /api/push/test` | Endpoint administrativo antigo, protegido pelo segredo; broadcast. Não é usado pela interface. |
 
-```bash
-npx web-push generate-vapid-keys
-```
+Mutações rejeitam origem estrangeira, corpos acima de 16 KiB, chaves malformadas e destinos fora dos provedores push permitidos. Registro com `CF-Connecting-IP` tem orçamento de 20/hora por hash temporário. Testes direcionados e chuva usam transporte com redirects bloqueados. Nenhum segredo deve entrar em URL, log ou bundle.
 
-This prints a public key and a private key. Store them as Worker secrets (see [SECRETS.md](SECRETS.md)):
+## VAPID e operação
 
-- `VAPID_PUBLIC_KEY`
-- `VAPID_PRIVATE_KEY`
-- `VAPID_SUBJECT` (optional; defaults to `mailto:admin@meteo-data.workers.dev`)
+Preservar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` existentes nos bindings/segredos do Worker. Não rotacionar chaves durante este upgrade sem necessidade: assinaturas existentes dependem delas. Usar um par exclusivo para homologação.
 
-Keys are read from the environment at runtime — they are **never** hardcoded.
+Aplicar migrations 0010 e 0011 antes de publicar este código. `DISABLE_ALERTS=true` interrompe o pipeline antes de leituras de alertas. `RAIN_ALERT_DELIVERY_MODE=shadow` persiste eventos shadow e suspende transporte de chuva e previsão; lotes shadow nunca são convertidos para live. Default é live. Para validar, usar ambiente isolado e somente dispositivos de teste, começando em shadow.
 
-## Files
+Resultados de entregas ficam por sete dias; eventos por 30 dias, com limpeza limitada e indexada. O forecast mantém o mecanismo anterior de deduplicação, agora com filtragem de tipos/idioma e leitura paginada de assinaturas; a recuperação durável é específica da chuva observada.
 
-```
-src/push/
-  api.ts            HTTP handlers for subscribe/unsubscribe/public-key
-  subscriptions.ts  D1 persistence for push_subscriptions
-  send.ts           delivery via web-push-neo + 404/410 cleanup
-  rain.ts           dry->wet detection + message building
-  alerts.ts         orchestrates rain detection + sending
-  vapid.ts          base64url helpers for key handling
-dashboard/
-  public/sw.js      Service Worker (push + notification click)
-  src/push.ts       client-side subscribe/unsubscribe helpers
-  src/NotificationSettings.tsx  "Rain Alerts" UI card
-migrations/0002_push_subscriptions.sql
-```
+O service worker preserva tag e metadados, rejeita URLs externas e aguarda navegação antes de focar uma aba. Seu precache contém o shell, não respostas meteorológicas. O clique abre a estação ou o subconjunto de estações do aviso. Payload recebido depois da expiração é identificado como aviso anterior.
 
-## Local / Android testing notes
+## Validação e implantação
 
-- **Localhost**: push requires a secure context. Use `https://localhost` or Wrangler's dev preview URL. Push *delivery* to a real push service needs the deployed origin, but the subscribe flow and UI can be tested locally.
-- **Android Chrome**: Open the deployed URL, allow notifications, tap **Subscribe**, then add the site to the home screen (PWA). Rain-start notifications will appear even when the site is closed.
-- Notifications appear with the **🌦️ / 🌧️ / ⛈️** intensity prefix based on precipitation rate.
+Ver [registro de execução](planejamento-ui-ux-chuva/07-REGISTRO-DE-EXECUCAO.md) e [evidências](evidence/README.md). Testes de transporte simulados não demonstram recebimento no aparelho. Homologar Chromium, Firefox, Android real e iOS/PWA antes de produção. O PR não executa deploy, migrations remotas ou envio real.
 
-## Android troubleshooting ("Registration failed - push service error")
-
-This error is thrown by the browser's `pushManager.subscribe()` and usually means the device cannot reach the push provider (FCM), **not** a problem with the VAPID key or this codebase (if subscription works on desktop, the key and backend are confirmed fine).
-
-Common causes on Android:
-
-1. **No Google Play Services / no signed-in Google account.** Android Chrome delivers push via FCM, which requires Google Play Services and a signed-in Google account. Android **emulators** (the log's User-Agent shows model `"K"`, the emulator identifier) frequently lack this and fail with this exact error. Test on a real device with Play Services.
-2. **Browser or site not set up.** Make sure you're using **Chrome** (not a WebView or a custom browser), the site is served over **HTTPS** (it is), and notifications are allowed for the site.
-3. **Network / region restrictions.** Some networks or regions can't reach FCM. Try on mobile data and in a different location.
-
-To verify the deployment is healthy: run `curl https://<HOST>/api/push/public-key` and confirm it returns a valid 65-byte, `0x04`-prefixed key (the server validates this automatically — a misconfigured key returns a `500` with a clear message instead of a confusing browser error).
+Rollback: cortar com `DISABLE_ALERTS=true`; manter schema aditivo. Não reativar um Worker antigo que ignore preferências v2. Na retomada, pendências vencidas expiram e lacunas exigem nova referência silenciosa.

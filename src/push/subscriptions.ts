@@ -5,6 +5,7 @@ export interface PushSubscriptionRow {
   p256dh: string;
   auth: string;
   created_at: string;
+  preferences?: string;
 }
 
 /**
@@ -43,7 +44,7 @@ export async function listSubscriptions(
 ): Promise<PushSubscriptionRow[]> {
   const result = await db
     .prepare(
-      `SELECT endpoint, p256dh, auth, created_at FROM push_subscriptions ORDER BY created_at ASC`,
+      `SELECT endpoint, p256dh, auth, created_at, preferences FROM push_subscriptions ORDER BY created_at ASC`,
     )
     .all<PushSubscriptionRow>();
   return result.results ?? [];
@@ -55,7 +56,7 @@ export async function getSubscription(
 ): Promise<PushSubscriptionRow | null> {
   const row = await db
     .prepare(
-      `SELECT endpoint, p256dh, auth, created_at FROM push_subscriptions WHERE endpoint = ?`,
+      `SELECT endpoint, p256dh, auth, created_at, preferences FROM push_subscriptions WHERE endpoint = ?`,
     )
     .bind(endpoint)
     .first<PushSubscriptionRow>();

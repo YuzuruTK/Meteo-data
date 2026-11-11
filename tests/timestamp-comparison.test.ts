@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import { insertObservation } from "../src/db/observations";
-import {
-  upsertLatestObservation,
-  loadLatestStations,
-} from "../src/db/latest";
+import { upsertLatestObservation, loadLatestStations } from "../src/db/latest";
 import { getStations, getHourlyAverages } from "../src/dashboard/aggregate";
 import { rollupObservations } from "../src/db/rollups";
 import type { NormalizedWeatherObservation } from "../src/collector/types";
@@ -29,8 +26,7 @@ import type { NormalizedWeatherObservation } from "../src/collector/types";
 const sqliteModuleName = "node:" + "sqlite"; // dynamic specifier: no static types required
 const sqlite = await import(sqliteModuleName).catch(() => null);
 const DatabaseSync = sqlite?.DatabaseSync as
-  | (new (path?: string) => unknown)
-  | undefined;
+  (new (path?: string) => unknown) | undefined;
 
 const makeObs = (
   locationId: string,
@@ -67,10 +63,12 @@ class SqliteD1 {
     const wrap = (args: unknown[]) => ({
       run: async () => {
         const info = stmt.run(...(args as never[]));
-        return { meta: { changes: Number((info as { changes: number }).changes ?? 0) } };
+        return {
+          meta: { changes: Number((info as { changes: number }).changes ?? 0) },
+        };
       },
       all: async <T>() => ({ results: stmt.all(...(args as never[])) as T[] }),
-      first: async <T>() => ((stmt.get(...(args as never[])) as T) ?? null),
+      first: async <T>() => (stmt.get(...(args as never[])) as T) ?? null,
     });
     return {
       bind: (...args: unknown[]) => wrap(args),
@@ -90,9 +88,11 @@ function createMigratedDb(): unknown {
   // Apply every real migration in order, using Vite's import.meta.glob so no
   // Node-specific fs/path types are required in this Workers-targeted repo.
   type Glob = Record<string, string>;
-  const glob = (import.meta as unknown as {
-    glob: (p: string, o: object) => Glob;
-  }).glob("../migrations/*.sql", {
+  const glob = (
+    import.meta as unknown as {
+      glob: (p: string, o: object) => Glob;
+    }
+  ).glob("../migrations/*.sql", {
     query: "?raw",
     import: "default",
     eager: true,
@@ -114,19 +114,30 @@ d("timestamp comparison against real SQLite", () => {
     const db = new SqliteD1(rawDb) as unknown as D1Database;
 
     const now = Date.now();
-    const iso = (minOffset: number) => new Date(now + minOffset * 60_000).toISOString();
+    const iso = (minOffset: number) =>
+      new Date(now + minOffset * 60_000).toISOString();
     // The regression case: an ISO timestamp whose calendar date matches the
     // 15-minute cutoff's date but whose time is long past — under the naive
     // TEXT comparison this would incorrectly pass the freshness filter.
     const cutoff = new Date(now - 15 * 60_000);
     const cutoffDatePart = cutoff.toISOString().slice(0, 10);
-    const cutoffMidnight = new Date(`${cutoffDatePart}T00:00:00.000Z`).getTime();
+    const cutoffMidnight = new Date(
+      `${cutoffDatePart}T00:00:00.000Z`,
+    ).getTime();
     const boundarySafe = cutoff.getTime() - cutoffMidnight > 2 * 60_000;
 
     const stations = [
       { id: "st-fresh", name: "Fresh", at: iso(-2) },
       { id: "st-30min", name: "Thirty", at: iso(-30) },
-      ...(boundarySafe ? [{ id: "st-boundary", name: "Boundary", at: `${cutoffDatePart}T00:00:00.000Z` }] : []),
+      ...(boundarySafe
+        ? [
+            {
+              id: "st-boundary",
+              name: "Boundary",
+              at: `${cutoffDatePart}T00:00:00.000Z`,
+            },
+          ]
+        : []),
       { id: "st-prevday", name: "PrevDay", at: iso(-30 * 60) },
     ];
 
@@ -151,8 +162,11 @@ d("timestamp comparison against real SQLite", () => {
     const db = new SqliteD1(raw) as unknown as D1Database;
 
     const now = Date.now();
-    const iso = (minOffset: number) => new Date(now + minOffset * 60_000).toISOString();
-    const cutoffDatePart = new Date(now - 15 * 60_000).toISOString().slice(0, 10);
+    const iso = (minOffset: number) =>
+      new Date(now + minOffset * 60_000).toISOString();
+    const cutoffDatePart = new Date(now - 15 * 60_000)
+      .toISOString()
+      .slice(0, 10);
 
     raw.exec(`INSERT INTO weather_locations (id, source_id, external_id, name, created_at, updated_at) VALUES
       ('st-fresh', 'src', 'e1', 'Fresh', datetime('now'), datetime('now')),
@@ -161,9 +175,12 @@ d("timestamp comparison against real SQLite", () => {
 
     await upsertLatestObservation(db, makeObs("st-fresh", iso(-2)));
     await upsertLatestObservation(db, makeObs("st-30min", iso(-30)));
-    await upsertLatestObservation(db, makeObs("st-boundary", `${cutoffDatePart}T00:00:00.000Z`));
+    await upsertLatestObservation(
+      db,
+      makeObs("st-boundary", `${cutoffDatePart}T00:00:00.000Z`),
+    );
 
-    const stations = await getStations(db, { hours: 24, staleMinutes: 15 });
+    const stations = await getStations(db, { hours: 48, staleMinutes: 15 });
     const byId = new Map(stations.map((s) => [s.id, s]));
 
     expect(byId.get("st-fresh")?.stale).toBe(false);
@@ -180,7 +197,8 @@ d("timestamp comparison against real SQLite", () => {
     const db = new SqliteD1(raw) as unknown as D1Database;
 
     const now = Date.now();
-    const iso = (minOffset: number) => new Date(now + minOffset * 60_000).toISOString();
+    const iso = (minOffset: number) =>
+      new Date(now + minOffset * 60_000).toISOString();
 
     raw.exec(`INSERT INTO weather_locations (id, source_id, external_id, name, created_at, updated_at) VALUES
       ('st-1h', 'src', 'e1', 'OneHour', datetime('now'), datetime('now')),
@@ -212,8 +230,11 @@ d("timestamp comparison against real SQLite", () => {
     const db = new SqliteD1(raw) as unknown as D1Database;
 
     const now = Date.now();
-    const iso = (minOffset: number) => new Date(now + minOffset * 60_000).toISOString();
-    const cutoffDatePart = new Date(now - 24 * 60 * 60_000).toISOString().slice(0, 10);
+    const iso = (minOffset: number) =>
+      new Date(now + minOffset * 60_000).toISOString();
+    const cutoffDatePart = new Date(now - 24 * 60 * 60_000)
+      .toISOString()
+      .slice(0, 10);
 
     raw.exec(`INSERT INTO weather_locations (id, source_id, external_id, name, created_at, updated_at) VALUES
       ('st-a', 'src', 'e1', 'A', datetime('now'), datetime('now')),
@@ -221,7 +242,10 @@ d("timestamp comparison against real SQLite", () => {
 
     await insertObservation(db, makeObs("st-a", iso(-30), 2));
     // Same calendar date as the 24-hour cutoff, but ~48 hours old.
-    await insertObservation(db, makeObs("st-b", `${cutoffDatePart}T00:00:00.000Z`, 5));
+    await insertObservation(
+      db,
+      makeObs("st-b", `${cutoffDatePart}T00:00:00.000Z`, 5),
+    );
 
     await rollupObservations(db);
 

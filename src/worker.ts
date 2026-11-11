@@ -22,16 +22,19 @@ import type { Env } from "./db/types";
 const TRIGGER_HEADER = "x-collector-trigger";
 
 export default {
-  scheduled: async (controller: ScheduledController, env: Env): Promise<void> => {
+  scheduled: async (
+    controller: ScheduledController,
+    env: Env,
+  ): Promise<void> => {
     console.log(`[worker] scheduled collection triggered (${controller.cron})`);
     const sources = loadEnabledSources();
-    const run = await runCollection(sources, env);
-    console.log(
-      `[worker] run ${run.id} finished: ${run.status} ` +
-        `(${run.requests_succeeded} ok / ${run.requests_failed} failed)`,
-    );
-
-    if (run.requests_succeeded > 0) {
+    try {
+      const run = await runCollection(sources, env);
+      console.log(
+        `[worker] run ${run.id} finished: ${run.status} ` +
+          `(${run.requests_succeeded} ok / ${run.requests_failed} failed)`,
+      );
+    } finally {
       await maybeRunWeatherAlerts(env);
     }
   },
@@ -47,6 +50,19 @@ export default {
     if (url.pathname.startsWith("/api/") && request.method === "GET") {
       const response = await handleApi(request, env.DB, {
         readOnlyEmergency: env.READ_ONLY_EMERGENCY === "true",
+        rainAvailable:
+          env.DISABLE_ALERTS !== "true" &&
+          !!env.VAPID_PUBLIC_KEY &&
+          !!env.VAPID_PRIVATE_KEY &&
+          env.RAIN_ALERT_DELIVERY_MODE !== "shadow",
+        alertReason:
+          env.DISABLE_ALERTS === "true"
+            ? "disabled"
+            : env.RAIN_ALERT_DELIVERY_MODE === "shadow"
+              ? "shadow"
+              : !env.VAPID_PRIVATE_KEY
+                ? "unconfigured"
+                : undefined,
       });
       if (response) return response;
     }
@@ -59,6 +75,9 @@ export default {
       const pushResponse = await handlePushApi(request, {
         DB: env.DB,
         VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY,
+        VAPID_SUBJECT: env.VAPID_SUBJECT,
+        DISABLE_ALERTS: env.DISABLE_ALERTS,
       });
       if (pushResponse) return pushResponse;
     }
@@ -90,17 +109,23 @@ async function maybeRunWeatherAlerts(env: Env): Promise<void> {
     return;
   }
 
-  const stations = await loadLatestStations(env.DB);
-  const rainResult = await runRainAlerts({
-    db: env.DB,
-    vapid: pushOptions,
-    stations,
-  });
-  console.log(
-    `[worker] rain alerts: ${rainResult.alertsFired} fired, ` +
-      `${rainResult.notificationsSent} sent, ${rainResult.notificationsRemoved} removed`,
-  );
+  try {
+    const stations = await loadLatestStations(env.DB);
+    const rainResult = await runRainAlerts({
+      db: env.DB,
+      vapid: pushOptions,
+      stations,
+      mode: env.RAIN_ALERT_DELIVERY_MODE ?? "live",
+    });
+    console.log(
+      `[worker] rain alerts: ${rainResult.alertsFired} fired, ` +
+        `${rainResult.notificationsSent} sent, ${rainResult.notificationsRemoved} removed`,
+    );
+  } catch {
+    console.error("[worker] rain pipeline failed; pending deliveries retained");
+  }
 
+  if (env.RAIN_ALERT_DELIVERY_MODE === "shadow") return;
   try {
     // Uses the same cached Open-Meteo forecast already exposed by /api/forecast,
     // avoiding an external request for every alert evaluation.
@@ -126,14 +151,18 @@ async function handlePushTest(request: Request, env: Env): Promise<Response> {
   const secret = env.COLLECTOR_TRIGGER_SECRET;
   if (secret) {
     const provided = request.headers.get(TRIGGER_HEADER);
-    if (provided !== secret) return new Response("Unauthorized", { status: 401 });
+    if (provided !== secret)
+      return new Response("Unauthorized", { status: 401 });
   } else {
     return new Response("Forbidden", { status: 403 });
   }
 
   const pushOptions = buildPushSendOptions(env);
   if (!pushOptions) {
-    return Response.json({ error: "VAPID keys are not configured" }, { status: 500 });
+    return Response.json(
+      { error: "VAPID keys are not configured" },
+      { status: 500 },
+    );
   }
 
   const delivery = await sendPushNotifications(env.DB, pushOptions, {
@@ -142,23 +171,29 @@ async function handlePushTest(request: Request, env: Env): Promise<Response> {
     data: { url: "/" },
   });
 
-  return Response.json({ sent: delivery.sent, removed: delivery.removed, errors: delivery.errors });
+  return Response.json({
+    sent: delivery.sent,
+    removed: delivery.removed,
+    errors: delivery.errors,
+  });
 }
 
 async function handleTrigger(request: Request, env: Env): Promise<Response> {
   const secret = env.COLLECTOR_TRIGGER_SECRET;
   if (secret) {
     const provided = request.headers.get(TRIGGER_HEADER);
-    if (provided !== secret) return new Response("Unauthorized", { status: 401 });
+    if (provided !== secret)
+      return new Response("Unauthorized", { status: 401 });
   } else {
     return new Response("Forbidden", { status: 403 });
   }
 
-  if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+  if (request.method !== "POST")
+    return new Response("Method Not Allowed", { status: 405 });
 
   const sources = loadEnabledSources();
   const run = await runCollection(sources, env);
-  if (run.requests_succeeded > 0) await maybeRunWeatherAlerts(env);
+  await maybeRunWeatherAlerts(env);
 
   return Response.json({
     run_id: run.id,
