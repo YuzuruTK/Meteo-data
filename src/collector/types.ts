@@ -62,21 +62,38 @@ export interface RequestConfig {
    * `stationId` value. If omitted, no per-location parameter is injected.
    */
   location_param?: string;
+  /**
+   * Map request parameter names to per-location property names when multiple
+   * dynamic values are needed (e.g. `{ latitude: "latitude", longitude: "longitude" }`).
+   */
+  location_params?: Record<string, string>;
 }
 
 /** Per-source normalization rules mapping canonical fields to response paths. */
 export interface NormalizationFieldConfig {
   /** JSON path within the selected observation object, e.g. `$.metric.temp`. */
   path: string;
-  /** Source unit of the value, e.g. `F`, `kW/m2`. */
+  /**
+   * Source unit of the value, e.g. `F`, `kW/m2`. When omitted, the value is
+   * explicitly assumed to already use the field's canonical unit.
+   */
   unit?: string;
   /** Optional target unit to convert to; canonical unit is used if omitted. */
   convert_to?: string;
 }
 
+export type TimestampFormat = "iso8601" | "unix_seconds" | "unix_milliseconds";
+
+/** Explicit timestamp interpretation is required for every source. */
+export interface TimestampFieldConfig extends NormalizationFieldConfig {
+  format: TimestampFormat;
+  /** IANA timezone used for ISO-8601 timestamps without an explicit offset. */
+  timezone?: string;
+}
+
 export type NormalizationFieldsConfig = Partial<
-  Record<WeatherField, NormalizationFieldConfig>
->;
+  Record<Exclude<WeatherField, "observed_at">, NormalizationFieldConfig>
+> & { observed_at: TimestampFieldConfig };
 
 export interface NormalizationConfig {
   /**
@@ -101,6 +118,8 @@ export interface NormalizationConfig {
 export interface WeatherLocationConfig {
   id: string;
   name: string;
+  /** Stable source-specific identifier used when no single `location_param` is configured. */
+  external_id?: string;
   latitude?: number;
   longitude?: number;
   [paramName: string]: string | number | boolean | null | undefined;
@@ -128,16 +147,16 @@ export interface NormalizedWeatherObservation {
   observed_at: string; // ISO-8601 UTC
   temperature: number | null; // °C
   solar_radiation: number | null; // W/m²
-  humidity: number | null;
+  humidity: number | null; // %
   pressure: number | null; // hPa
   wind_speed: number | null; // km/h
   wind_direction: number | null; // degrees
   wind_gust: number | null; // km/h
   precipitation_rate: number | null; // mm/h
   precipitation_total: number | null; // mm
-  uv_index: number | null;
+  uv_index: number | null; // dimensionless UV index
   cloud_cover: number | null; // %
-  visibility: number | null;
+  visibility: number | null; // m
   collected_at: string; // ISO-8601 UTC
 }
 

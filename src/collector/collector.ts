@@ -265,7 +265,11 @@ async function collectOne(
 
   // 5. Upsert location metadata (enrich only where config lacks coords).
   try {
-    const externalId = String(location[source.request.location_param ?? "id"] ?? location.id);
+    const externalId = String(
+      (source.request.location_param
+        ? location[source.request.location_param]
+        : location.external_id) ?? location.id,
+    );
     await upsertLocation(env.DB, {
       id: location.id,
       sourceId: source.id,

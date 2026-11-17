@@ -28,10 +28,10 @@ string `"true"`, behavior is identical to before this patch.
 
 Notes:
 
-- `/api/summary` and `/api/forecast` are intentionally left enabled: the
-  summary endpoint reads the tiny precomputed `dashboard_summary` table and
-  the forecast endpoint is served from a cached Open-Meteo response, so both
-  are already read-cheap.
+- `/api/summary` and `/api/forecast` are intentionally left enabled: summary
+  keeps its tiny precomputed `dashboard_summary` read and adds a bounded query
+  for recent observations used by effective-current fallback; the forecast
+  endpoint is served from a cached Open-Meteo response.
 - `insertObservation()`, `updateDashboardSummary()` and
   `upsertLatestObservation()` remain active (write-path, O(1) each) —
   observation collection and storage are preserved by design.

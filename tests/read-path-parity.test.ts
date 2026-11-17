@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import { insertObservation } from "../src/db/observations";
 import { upsertLatestObservation } from "../src/db/latest";
 import { rollupObservations } from "../src/db/rollups";
-import { getHourlyAverages, getStations } from "../src/dashboard/aggregate";
+import { getHourlyAverages, getPrecipitationSamples, getStations } from "../src/dashboard/aggregate";
 import type { HourlyAverageRow, StationRow } from "../src/dashboard/aggregate";
 import type { NormalizedWeatherObservation } from "../src/collector/types";
 
@@ -313,5 +313,45 @@ d("read-path parity: rollup tables vs raw computation", () => {
     expect(
       empty.every((s) => s.last_observed_at === null && s.stale === false),
     ).toBe(true);
+  });
+
+  it("reads one boundary sample plus every in-window cumulative reading", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T10:30:00.000Z"));
+    try {
+      const raw = createMigratedDb() as {
+        exec: (sql: string) => void;
+        prepare: (sql: string) => any;
+      };
+      const db = new SqliteD1(raw) as unknown as D1Database;
+
+      raw.exec(
+        `INSERT INTO weather_locations (id, source_id, external_id, name, created_at, updated_at) VALUES
+        ('loc-1', 'weather-com-pws', 'e1', 'Alpha', datetime('now'), datetime('now'))`,
+      );
+
+      const now = Date.now();
+      const at = (minutesAgo: number) =>
+        new Date(now - minutesAgo * 60_000).toISOString();
+      const totals: Array<[number, number]> = [
+        [140, 4.0],
+        [130, 4.2],
+        [93, 4.5],
+        [85, 5.0],
+        [5, 5.2],
+      ];
+      for (const [minutesAgo, total] of totals) {
+        await insertObservation(
+          db,
+          makeObs("loc-1", at(minutesAgo), { precipitation_total: total }),
+        );
+      }
+
+      const samples = await getPrecipitationSamples(db, { hours: 1 });
+      expect(samples.map((sample) => sample.precipitation_total)).toEqual([4.5, 5.0, 5.2]);
+      expect(samples.every((sample) => sample.source_id === "weather-com-pws")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

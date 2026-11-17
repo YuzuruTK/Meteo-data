@@ -52,9 +52,16 @@ class FakeD1 {
                 station_id: h.location_id,
                 station_name: (loc?.name as string) ?? "",
                 hour: h.hour,
+                observation_count: count,
                 temperature_avg: self.num(h.temperature_avg),
+                temperature_min: self.num(h.temperature_min),
+                temperature_max: self.num(h.temperature_max),
                 solar_radiation_avg: self.num(h.solar_radiation_avg),
+                solar_radiation_min: self.num(h.solar_radiation_min),
+                solar_radiation_max: self.num(h.solar_radiation_max),
                 humidity_avg: self.num(h.humidity_avg),
+                humidity_min: self.num(h.humidity_min),
+                humidity_max: self.num(h.humidity_max),
                 pressure_avg: self.num(h.pressure_avg),
                 wind_speed_avg: self.num(h.wind_speed_avg),
                 wind_direction_avg: self.num(h.wind_direction_avg),
@@ -63,12 +70,26 @@ class FakeD1 {
                 precipitation_total_avg:
                   count > 0 && total !== null ? total / count : null,
                 uv_index_avg: self.num(h.uv_index_avg),
+                uv_index_max: self.num(h.uv_index_max),
                 cloud_cover_avg: self.num(h.cloud_cover_avg),
                 visibility_avg: self.num(h.visibility_avg),
               };
             });
           rows.sort((a, b) => (a.hour as string).localeCompare(b.hour as string));
           return { results: rows };
+        }
+
+        // Cumulative precipitation samples: return the raw rows the route
+        // needs; the browser derives the accumulation with shared helpers.
+        if (sql.includes("FROM weather_observations")) {
+          const results: Row[] = self.observations
+            .map((o) => ({
+              station_id: o.location_id,
+              source_id: o.source_id,
+              observed_at: o.observed_at,
+              precipitation_total: self.num(o.precipitation_total),
+            }));
+          return { results };
         }
 
         // Stations query: latest-observation-per-station with a stale flag,
@@ -125,11 +146,12 @@ describe("dashboard aggregation (rollup read path)", () => {
     db.hourly.push(
       {
         location_id: "loc-1", hour: "2025-01-01 10:00",
-        temperature_avg: 21, solar_radiation_avg: 110, humidity_avg: 57.5,
+        temperature_avg: 21, temperature_min: 18, temperature_max: 23,
+        solar_radiation_avg: 110, humidity_avg: 57.5,
         pressure_avg: null, wind_speed_avg: null, wind_direction_avg: null,
         wind_gust_avg: null, precipitation_rate_avg: null,
         precipitation_total_sum: 2, observation_count: 2,
-        uv_index_avg: null, cloud_cover_avg: null, visibility_avg: null,
+        uv_index_avg: null, uv_index_max: 4, cloud_cover_avg: null, visibility_avg: null,
       },
       {
         location_id: "loc-1", hour: "2025-01-01 11:00",
@@ -147,6 +169,10 @@ describe("dashboard aggregation (rollup read path)", () => {
     expect(rows[0]?.station_name).toBe("Ijuí A");
     expect(rows[0]?.hour).toBe("2025-01-01 10:00");
     expect(rows[0]?.temperature_avg).toBe(21);
+    expect(rows[0]?.temperature_min).toBe(18);
+    expect(rows[0]?.temperature_max).toBe(23);
+    expect(rows[0]?.observation_count).toBe(2);
+    expect(rows[0]?.uv_index_max).toBe(4);
     expect(rows[0]?.solar_radiation_avg).toBe(110);
     expect(rows[0]?.humidity_avg).toBe(57.5);
     // precipitation_total_avg derived as sum / count.
@@ -263,6 +289,35 @@ describe("dashboard API", () => {
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0]?.temperature_avg).toBe(20);
     expect(body.filters.hours).toBe(24);
+  });
+
+  it("returns cumulative precipitation samples for the selected stations", async () => {
+    const db = new FakeD1();
+    db.observations.push(
+      {
+        location_id: "loc-1", source_id: "weather-com-pws",
+        observed_at: "2025-01-01T10:00:00.000Z", precipitation_total: 4.2,
+      },
+      {
+        location_id: "loc-2", source_id: "weather-com-pws",
+        observed_at: "2025-01-01T10:00:00.000Z", precipitation_total: 1.1,
+      },
+    );
+
+    const req = new Request(
+      "https://example.workers.dev/api/observations/precipitation?hours=24&station=loc-1&station=loc-2",
+      { method: "GET", headers: { origin: "https://example.workers.dev" } },
+    );
+    const res = await handleApi(req, db as unknown as D1Database);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      samples: Array<{ station_id: string; precipitation_total: number | null }>;
+      filters: { hours: number; stations: string[] | null };
+    };
+    expect(body.samples).toHaveLength(2);
+    expect(body.samples.map((sample) => sample.station_id)).toEqual(["loc-1", "loc-2"]);
+    expect(body.filters.stations).toEqual(["loc-1", "loc-2"]);
   });
 
   it("returns null for unknown /api paths", async () => {

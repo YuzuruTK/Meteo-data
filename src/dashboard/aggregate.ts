@@ -44,9 +44,17 @@ export interface HourlyAverageRow {
   station_name: string;
   /** Hour bucket label, e.g. "2025-01-01 14:00". */
   hour: string;
+  /** Number of raw observations aggregated into this bucket. */
+  observation_count: number;
   temperature_avg: number | null;
+  temperature_min: number | null;
+  temperature_max: number | null;
   solar_radiation_avg: number | null;
+  solar_radiation_min: number | null;
+  solar_radiation_max: number | null;
   humidity_avg: number | null;
+  humidity_min: number | null;
+  humidity_max: number | null;
   pressure_avg: number | null;
   wind_speed_avg: number | null;
   wind_direction_avg: number | null;
@@ -54,6 +62,7 @@ export interface HourlyAverageRow {
   precipitation_rate_avg: number | null;
   precipitation_total_avg: number | null;
   uv_index_avg: number | null;
+  uv_index_max: number | null;
   cloud_cover_avg: number | null;
   visibility_avg: number | null;
 }
@@ -63,6 +72,47 @@ export interface AggregationOptions {
   hours?: number;
   /** Filter to a single station (weather_locations.id). */
   station?: string;
+  /** Filter to several stations (weather_locations.id). */
+  stations?: string[];
+}
+
+/** One cumulative precipitation reading from the raw observation table. */
+export interface PrecipitationSampleRow {
+  station_id: string;
+  source_id: string;
+  observed_at: string;
+  precipitation_total: number | null;
+}
+
+export interface PrecipitationSamplesOptions {
+  /** Number of recent hours to include. Defaults to 24. */
+  hours?: number;
+  /** Filter to a single station (weather_locations.id). */
+  station?: string;
+  /** Filter to several stations (weather_locations.id). */
+  stations?: string[];
+}
+
+/** Clamp the rolling window to the same bounds used by the aggregate route. */
+export function clampAggregationHours(hours: number | undefined): number {
+  return Math.max(1, Math.min(24 * 30, Math.floor(hours ?? 24)));
+}
+
+function stationWhere(
+  column: string,
+  opts: { station?: string; stations?: string[] },
+  bindings: string[],
+): string {
+  if (opts.stations) {
+    if (opts.stations.length === 0) return "0 = 1";
+    bindings.push(...opts.stations);
+    return `${column} IN (${opts.stations.map(() => "?").join(", ")})`;
+  }
+  if (opts.station) {
+    bindings.push(opts.station);
+    return `${column} = ?`;
+  }
+  return "1 = 1";
 }
 
 export interface StationRow {
@@ -96,9 +146,9 @@ export async function getHourlyAverages(
   db: D1Database,
   opts: AggregationOptions = {},
 ): Promise<HourlyAverageRow[]> {
-  const hours = opts.hours ?? 24;
-  const hoursClamped = Math.max(1, Math.min(24 * 30, Math.floor(hours)));
+  const hoursClamped = clampAggregationHours(opts.hours);
 
+  const bindings: string[] = [];
   const where: string[] = [
     // `hour` is stored as "YYYY-MM-DD HH:00" (UTC) and strftime() emits the
     // same format, so this is a correct lexicographic range comparison AND a
@@ -107,22 +157,24 @@ export async function getHourlyAverages(
     // wrong — 'T' > ' ' — which is why the raw-table queries wrapped the
     // column in datetime(); the rollup's hour format needs no such wrap.)
     `h.hour >= strftime('%Y-%m-%d %H:00', 'now', '-${hoursClamped} hours')`,
+    stationWhere("h.location_id", opts, bindings),
   ];
-  const bindings: (string | number)[] = [];
-
-  if (opts.station) {
-    where.push("h.location_id = ?");
-    bindings.push(opts.station);
-  }
 
   const sql = `
     SELECT
       h.location_id AS station_id,
       wl.name AS station_name,
       h.hour,
+      h.observation_count AS observation_count,
       h.temperature_avg AS temperature_avg,
+      h.temperature_min AS temperature_min,
+      h.temperature_max AS temperature_max,
       h.solar_radiation_avg AS solar_radiation_avg,
+      h.solar_radiation_min AS solar_radiation_min,
+      h.solar_radiation_max AS solar_radiation_max,
       h.humidity_avg AS humidity_avg,
+      h.humidity_min AS humidity_min,
+      h.humidity_max AS humidity_max,
       h.pressure_avg AS pressure_avg,
       h.wind_speed_avg AS wind_speed_avg,
       h.wind_direction_avg AS wind_direction_avg,
@@ -132,6 +184,7 @@ export async function getHourlyAverages(
            ELSE h.precipitation_total_sum / h.observation_count
       END AS precipitation_total_avg,
       h.uv_index_avg AS uv_index_avg,
+      h.uv_index_max AS uv_index_max,
       h.cloud_cover_avg AS cloud_cover_avg,
       h.visibility_avg AS visibility_avg
     FROM weather_observations_hourly h
@@ -143,6 +196,101 @@ export async function getHourlyAverages(
   const stmt = db.prepare(sql);
   const result = bindings.length > 0 ? stmt.bind(...bindings) : stmt;
   return result.all<HourlyAverageRow>().then((r) => r.results ?? []);
+}
+
+/**
+ * Read the cumulative precipitation readings needed to derive a per-station
+ * accumulation for the selected rolling window.
+ *
+ * Weather.com's `precipTotal` is a cumulative gauge reading, so a period total
+ * must be derived from adjacent positive differences rather than by summing
+ * the hourly `precipitation_total_avg` values. One sample at or immediately
+ * before the window start is retained as the baseline.
+ *
+ * Both the station filter and the lower time bound are sargable on
+ * `idx_weather_observations_location_time`. A one-hour lookback is enough to
+ * find the boundary sample at the production 5-minute cadence; if no sample
+ * exists within that hour, the data is already too sparse for a trustworthy
+ * comparison.
+ *
+ * The caller compares `now` with the same `hours` value supplied to the
+ * aggregate query. Only source-agnostic raw readings are returned; whether
+ * they have cumulative semantics is decided by the caller, because Open-Meteo
+ * stores a per-interval amount in the same canonical column.
+ */
+export async function getPrecipitationSamples(
+  db: D1Database,
+  opts: PrecipitationSamplesOptions = {},
+): Promise<PrecipitationSampleRow[]> {
+  if (opts.stations && opts.stations.length === 0) return [];
+
+  // The dashboard's "all stations" state sends no station filter. Resolve the
+  // configured ids so the raw query still starts with location_id and can use
+  // idx_weather_observations_location_time instead of scanning all history.
+  let resolved = opts;
+  if (!opts.station && !opts.stations) {
+    const locations = await db
+      .prepare("SELECT id FROM weather_locations ORDER BY id ASC")
+      .all<{ id: string }>();
+    const ids = (locations.results ?? []).map((row) => row.id);
+    if (ids.length === 0) return [];
+    resolved = { ...opts, stations: ids };
+  }
+
+  const hoursClamped = clampAggregationHours(resolved.hours);
+  const now = Date.now();
+  // Match the aggregate query, which bounds `hour` with strftime(..., '%H:00').
+  // Rain must start at the same UTC hour boundary, not an exact millisecond.
+  const cutoff = new Date(now - hoursClamped * 3_600_000);
+  cutoff.setUTCMinutes(0, 0, 0);
+  const cutoffIso = cutoff.toISOString();
+  const lookbackIso = new Date(cutoff.getTime() - 3_600_000).toISOString();
+  const bindings: string[] = [];
+  const where = stationWhere("location_id", resolved, bindings);
+  bindings.push(lookbackIso);
+
+  const sql = `
+    SELECT
+      location_id AS station_id,
+      source_id,
+      observed_at,
+      precipitation_total
+    FROM weather_observations
+    WHERE ${where}
+      AND observed_at > ?
+    ORDER BY location_id ASC, observed_at ASC
+  `;
+
+  const stmt = db.prepare(sql);
+  const result = bindings.length > 0 ? stmt.bind(...bindings) : stmt;
+  const rows = (await result.all<PrecipitationSampleRow>()).results ?? [];
+
+  // Keep the last reading at or before the exact cutoff, then every reading
+  // after it. This makes the comparison boundary identical to the aggregate
+  // period without returning the long history before the window.
+  const byStation = new Map<string, PrecipitationSampleRow[]>();
+  for (const row of rows) {
+    const group = byStation.get(row.station_id) ?? [];
+    group.push(row);
+    byStation.set(row.station_id, group);
+  }
+
+  const output: PrecipitationSampleRow[] = [];
+  for (const group of byStation.values()) {
+    group.sort((a, b) => a.observed_at.localeCompare(b.observed_at));
+    let boundary = -1;
+    for (let i = 0; i < group.length; i += 1) {
+      if (group[i]!.observed_at <= cutoffIso) boundary = i;
+      else break;
+    }
+    output.push(...group.slice(boundary >= 0 ? boundary : 0));
+  }
+
+  return output.sort((a, b) =>
+    a.station_id === b.station_id
+      ? a.observed_at.localeCompare(b.observed_at)
+      : a.station_id.localeCompare(b.station_id),
+  );
 }
 
 /** Default stale threshold in minutes. */

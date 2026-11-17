@@ -26,7 +26,9 @@ export function loadConfig(): WeatherSourcesConfig {
     return cached;
   }
 
-  const config = rawConfig as WeatherSourcesConfig;
+  // The JSON array contains heterogeneous source shapes with optional request
+  // properties; validate the decoded configuration before using it.
+  const config = rawConfig as unknown as WeatherSourcesConfig;
   validateConfig(config);
   cached = config;
   return config;

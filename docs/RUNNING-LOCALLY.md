@@ -78,6 +78,33 @@ sqlite3 .wrangler/state/v3/d1/<database-id>.sqlite ".tables"
 sqlite3 .wrangler/state/v3/d1/<database-id>.sqlite "SELECT * FROM weather_observations ORDER BY collected_at DESC LIMIT 10;"
 ```
 
+## Run locally with a production-data example
+
+To use a copy of production data without changing your normal local D1:
+
+```bash
+npm run dev:example
+```
+
+The local-only script first checks `.wrangler/production-example/production-example.sql`.
+If the dump is less than 60 minutes old, it reuses it without exporting again or
+overwriting it. Otherwise, it exports a fresh SQL snapshot from the remote
+`meteo-data` D1 and imports it into a separate local persistence directory at
+`.wrangler/production-example/state`. The example worker uses that same directory.
+Stop the example worker before running `npm run db:example` manually to refresh it.
+
+The snapshot includes weather locations, raw observations, and the dashboard's
+materialized summary/rollup tables. It excludes push subscriptions and collector
+run/request logs and alert state. The omitted operational tables are created empty
+locally so application routes can still be exercised. These files are under
+`.wrangler/` and are ignored by Git.
+
+The remote export runs at most once per hour when you use this command, but it
+still scans the selected production tables and may count toward D1 usage. Cloudflare
+also documents that a running export blocks other requests to that database, so
+prefer running it outside peak usage. The local Worker serves the copied data;
+avoid manually triggering collection if you only want to explore the snapshot.
+
 ## Notes
 
 - The scheduled handler awaits the collection directly so Cloudflare can track completion and surface failures.

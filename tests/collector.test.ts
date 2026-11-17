@@ -126,7 +126,7 @@ const makeSource = (overrides: Partial<WeatherSourceConfig> = {}): WeatherSource
     normalization: {
       observation_selector: "$.observations[0]",
       fields: {
-        observed_at: { path: "$.obsTimeUtc" },
+        observed_at: { path: "$.obsTimeUtc", format: "iso8601" },
         temperature: { path: "$.metric.temp", unit: "C" },
         solar_radiation: { path: "$.solarRadiation", unit: "W/m2" },
       },

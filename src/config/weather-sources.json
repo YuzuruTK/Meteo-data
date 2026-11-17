@@ -49,7 +49,8 @@
       "required": ["observed_at"],
       "fields": {
         "observed_at": {
-          "path": "$.obsTimeUtc"
+          "path": "$.obsTimeUtc",
+          "format": "iso8601"
         },
         "temperature": {
           "path": "$.metric.temp",
@@ -89,6 +90,112 @@
         "precipitation_total": {
           "path": "$.metric.precipTotal",
           "unit": "mm"
+        }
+      }
+    }
+  },
+  {
+    "id": "open-meteo-current",
+    "enabled": true,
+    "request": {
+      "method": "GET",
+      "url": "https://api.open-meteo.com/v1/forecast",
+      "headers": {},
+      "params": {
+        "current": "temperature_2m,relative_humidity_2m,surface_pressure,shortwave_radiation,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,cloud_cover,visibility,uv_index",
+        "timezone": "UTC",
+        "temperature_unit": "celsius",
+        "wind_speed_unit": "kmh",
+        "precipitation_unit": "mm"
+      },
+      "timeout_ms": 10000,
+      "location_params": {
+        "latitude": "latitude",
+        "longitude": "longitude"
+      }
+    },
+    "locations": [
+      {
+        "id": "open-meteo-ijui",
+        "external_id": "ijui:-28.391268,-53.926267",
+        "name": "Ijuí",
+        "latitude": -28.391268,
+        "longitude": -53.926267
+      },
+      {
+        "id": "open-meteo-floresta",
+        "external_id": "floresta:-28.353393,-53.835706",
+        "name": "Floresta",
+        "latitude": -28.353393,
+        "longitude": -53.835706
+      },
+      {
+        "id": "open-meteo-mundstock",
+        "external_id": "mundstock:-28.404222,-53.913342",
+        "name": "Mundstock",
+        "latitude": -28.404222,
+        "longitude": -53.913342
+      },
+      {
+        "id": "open-meteo-itai",
+        "external_id": "itai:-28.310787,-53.962606",
+        "name": "Itaí",
+        "latitude": -28.310787,
+        "longitude": -53.962606
+      }
+    ],
+    "normalization": {
+      "observation_selector": "$.current",
+      "required": ["observed_at"],
+      "fields": {
+        "observed_at": {
+          "path": "$.time",
+          "format": "iso8601",
+          "timezone": "UTC"
+        },
+        "temperature": {
+          "path": "$.temperature_2m",
+          "unit": "C"
+        },
+        "solar_radiation": {
+          "path": "$.shortwave_radiation",
+          "unit": "W/m²"
+        },
+        "humidity": {
+          "path": "$.relative_humidity_2m",
+          "unit": "%"
+        },
+        "pressure": {
+          "path": "$.surface_pressure",
+          "unit": "hPa"
+        },
+        "wind_speed": {
+          "path": "$.wind_speed_10m",
+          "unit": "km/h"
+        },
+        "wind_direction": {
+          "path": "$.wind_direction_10m",
+          "unit": "degrees"
+        },
+        "wind_gust": {
+          "path": "$.wind_gusts_10m",
+          "unit": "km/h"
+        },
+        "precipitation_total": {
+          "path": "$.precipitation",
+          "unit": "mm"
+        },
+        "uv_index": {
+          "path": "$.uv_index",
+          "unit": "index"
+        },
+        "cloud_cover": {
+          "path": "$.cloud_cover",
+          "unit": "%"
+        },
+        "visibility": {
+          "path": "$.visibility",
+          "unit": "m"
         }
       }
     }

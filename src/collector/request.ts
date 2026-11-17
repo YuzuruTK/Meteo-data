@@ -2,7 +2,8 @@ import type { RequestConfig, WeatherLocationConfig } from "./types";
 
 /**
  * Builds an HTTP request from a source's request config plus a specific
- * location. All location-specific values are injected via `location_param`.
+ * location. Location-specific values can be injected via the legacy singular
+ * `location_param` or the generic `location_params` parameter-to-property map.
  *
  * Supports secret interpolation: any `${ENV_VAR}` references in headers,
  * params, or URL are resolved from the provided `env` object. Missing secrets
@@ -54,11 +55,22 @@ export function buildRequest(
     headers[key] = interpolateSecrets(value, env);
   }
 
-  // 3. Resolve query params (allow secret references), then inject the
-  //    location-specific parameter.
+  // 3. Resolve query params (allow secret interpolation), then inject
+  //    location-specific parameters.
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(requestConfig.params ?? {})) {
     params.set(key, interpolateSecrets(value, env));
+  }
+  for (const [parameterName, locationProperty] of Object.entries(
+    requestConfig.location_params ?? {},
+  )) {
+    const locationValue = location[locationProperty];
+    if (locationValue === undefined || locationValue === null) {
+      throw new RequestBuilderError(
+        `Location '${location.id}' is missing the required property '${locationProperty}' for request parameter '${parameterName}'`,
+      );
+    }
+    params.set(parameterName, String(locationValue));
   }
   if (requestConfig.location_param) {
     const locationValue = location[requestConfig.location_param];
