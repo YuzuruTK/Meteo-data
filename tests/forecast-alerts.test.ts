@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { ForecastHourly } from "../src/forecast/types";
 import {
@@ -12,6 +12,10 @@ import {
 import { sendNotification } from "web-push-neo";
 
 vi.mock("web-push-neo", () => ({ sendNotification: vi.fn().mockResolvedValue(undefined) }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 type State = { event_key: string; event_time: string; fingerprint: string };
 

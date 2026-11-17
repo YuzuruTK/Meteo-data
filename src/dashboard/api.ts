@@ -1,5 +1,5 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import { getHourlyAverages, getStations } from "./aggregate";
+import { getHourlyAverages, getPrecipitationSamples, getStations } from "./aggregate";
 import { AGGREGATE_COLUMNS } from "./aggregate";
 import { getDashboardSummaries } from "./summary";
 import {
@@ -22,10 +22,14 @@ function clampHours(value: string | null): number | undefined {
   return Math.min(n, 24 * 30);
 }
 
-function readQuery(url: URL): { hours?: number; station?: string } {
+function readQuery(url: URL): { hours?: number; station?: string; stations?: string[] } {
   const hours = clampHours(url.searchParams.get("hours"));
-  const station = url.searchParams.get("station")?.trim() || undefined;
-  return { hours, station };
+  const stationValues = Array.from(new Set(
+    url.searchParams.getAll("station").map((value) => value.trim()).filter(Boolean),
+  ));
+  const stations = stationValues.length > 0 ? stationValues : undefined;
+  const station = stations?.length === 1 ? stations[0] : undefined;
+  return { hours, station, stations };
 }
 
 /** Allowed origins for the dashboard API. */
@@ -86,13 +90,35 @@ export async function handleApi(
 
   if (pathMatches(url, "/api/observations/aggregate")) {
     if (emergency.readOnlyEmergency) return emergencyResponse();
-    const { hours, station } = readQuery(url);
-    const aggregates = await getHourlyAverages(db, { hours, station });
+    const { hours, station, stations } = readQuery(url);
+    const aggregates = await getHourlyAverages(db, { hours, station, stations });
     return json(
       {
         columns: AGGREGATE_COLUMNS,
         rows: aggregates,
-        filters: { hours: hours ?? 24, station: station ?? null },
+        filters: {
+          hours: hours ?? 24,
+          station: station ?? null,
+          stations: stations ?? (station ? [station] : null),
+        },
+      },
+      200,
+      origin,
+    );
+  }
+
+  if (pathMatches(url, "/api/observations/precipitation")) {
+    if (emergency.readOnlyEmergency) return emergencyResponse();
+    const { hours, station, stations } = readQuery(url);
+    const samples = await getPrecipitationSamples(db, { hours, station, stations });
+    return json(
+      {
+        samples,
+        filters: {
+          hours: hours ?? 24,
+          station: station ?? null,
+          stations: stations ?? (station ? [station] : null),
+        },
       },
       200,
       origin,

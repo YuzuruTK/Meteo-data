@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { fetchAggregates, fetchStations } from "./api";
+import { fetchAggregates, fetchCurrentSummaries, fetchPrecipitationSamples, fetchStations } from "./api";
 import { fetchForecast } from "./forecast";
-import type { AggregateResponse, ForecastResponse, Station } from "./types";
+import PeriodComparison from "./PeriodComparison";
+import { sourceLabel } from "./source";
+import type { AggregateResponse, CurrentSummary, ForecastResponse, PrecipitationSample, Station } from "./types";
 
-const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168];
+const HOUR_OPTIONS = [6, 12, 24, 48, 72, 168, 720];
 
 interface VarDef { key: string; label: string; unit: string; }
 
@@ -35,10 +37,34 @@ const SUMMARY_VARIABLES: VarDef[] = [
 const OPTIONAL_CHART_VARIABLES: VarDef[] = [{ key: "pressure_avg", label: "Pressure", unit: "hPa" }];
 const COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#00C49F", "#FF8042"];
 
+const LATEST_METRICS = [
+  { key: "temperature", label: "Temperature", unit: "°C", decimals: 1 },
+  { key: "solar_radiation", label: "Solar radiation", unit: "W/m²", decimals: 0 },
+  { key: "uv_index", label: "UV index", unit: "", decimals: 1 },
+  { key: "humidity", label: "Humidity", unit: "%", decimals: 0 },
+  { key: "precipitation_rate", label: "Precipitation rate", unit: "mm/h", decimals: 1 },
+  { key: "precipitation_total", label: "Precipitation total", unit: "mm", decimals: 1 },
+  { key: "pressure", label: "Pressure", unit: "hPa", decimals: 1 },
+  { key: "wind_speed", label: "Wind speed", unit: "km/h", decimals: 1 },
+  { key: "wind_direction", label: "Wind direction", unit: "°", decimals: 0 },
+] as const;
+
+function hourOptionLabel(hours: number): string {
+  if (hours === 168) return "7 days";
+  if (hours === 720) return "30 days";
+  return `${hours} hours`;
+}
+
 function formatHour(hour: string): string {
   const d = new Date(hour + ":00Z");
   if (Number.isNaN(d.getTime())) return hour;
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatObservedAt(observedAt: string): string {
+  const date = new Date(observedAt);
+  if (Number.isNaN(date.getTime())) return observedAt;
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function forecastHourKey(time: string): string {
@@ -86,9 +112,16 @@ function tempColor(v: number): string {
 }
 export default function App() {
   const [stations, setStations] = useState<Station[]>([]);
-  const [selected, setSelected] = useState<string>("");
+  const [selectedStationIds, setSelectedStationIds] = useState<string[] | null>(null);
   const [hours, setHours] = useState<number>(24);
   const [data, setData] = useState<AggregateResponse | null>(null);
+  const [aggregateLoading, setAggregateLoading] = useState(true);
+  const [currentSummaries, setCurrentSummaries] = useState<CurrentSummary[]>([]);
+  const [currentLoading, setCurrentLoading] = useState(true);
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  const [precipitationSamples, setPrecipitationSamples] = useState<PrecipitationSample[]>([]);
+  const [precipitationLoading, setPrecipitationLoading] = useState(false);
+  const [precipitationError, setPrecipitationError] = useState<string | null>(null);
   const [forecast, setForecast] = useState<ForecastResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -101,17 +134,37 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    fetchCurrentSummaries()
+      .then((next) => { if (!cancelled) setCurrentSummaries(next); })
+      .catch((e) => { if (!cancelled) setCurrentError(String(e)); })
+      .finally(() => { if (!cancelled) setCurrentLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const controller = new AbortController();
     // Fetch once per mount (first load / browser refresh) and whenever the
     // user changes a filter. No polling: an idle tab generates zero queries
     // (D1 read conservation, see docs/emergency-d1-mode.md).
     const refresh = async () => {
       setError(null);
+      setAggregateLoading(true);
       try {
-        const next = await fetchAggregates({ hours, station: selected || undefined, signal: controller.signal });
+        if (selectedStationIds !== null && selectedStationIds.length === 0) {
+          setData((previous) => ({
+            columns: previous?.columns ?? [],
+            rows: [],
+            filters: { hours, station: null, stations: [] },
+          }));
+          return;
+        }
+        const next = await fetchAggregates({ hours, stations: selectedStationIds ?? undefined, signal: controller.signal });
         if (!cancelled) setData(next);
       } catch (e) {
         if (!cancelled && !(e instanceof DOMException && e.name === "AbortError")) setError(String(e));
+      } finally {
+        if (!cancelled) setAggregateLoading(false);
       }
     };
     void refresh();
@@ -119,7 +172,39 @@ export default function App() {
       cancelled = true;
       controller.abort();
     };
-  }, [hours, selected]);
+  }, [hours, selectedStationIds]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    if (selectedStationIds !== null && selectedStationIds.length === 0) {
+      setPrecipitationSamples([]);
+      setPrecipitationLoading(false);
+      setPrecipitationError(null);
+      return () => controller.abort();
+    }
+    setPrecipitationLoading(true);
+    setPrecipitationError(null);
+    // Clear the previous selection immediately so a comparison never pairs
+    // new station choices with old samples.
+    setPrecipitationSamples([]);
+    fetchPrecipitationSamples({
+      hours,
+      stations: selectedStationIds ?? undefined,
+      signal: controller.signal,
+    })
+      .then((next) => { if (!cancelled) setPrecipitationSamples(next.samples); })
+      .catch((error) => {
+        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          setPrecipitationError(String(error));
+        }
+      })
+      .finally(() => { if (!cancelled) setPrecipitationLoading(false); });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [hours, selectedStationIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,15 +229,34 @@ export default function App() {
   const stationLabels = useMemo(() => {
     const map = new Map<string, string>();
     for (const station of stations) {
-      const source = station.source_id.startsWith("weather-com")
-        ? "Weather.com PWS"
-        : station.source_id.startsWith("open-meteo")
-          ? "Open-Meteo (estimate)"
-          : station.source_id;
-      map.set(station.id, `${station.name} — ${source}`);
+      map.set(station.id, `${station.name} — ${sourceLabel(station.source_id)}`);
     }
     return map;
   }, [stations]);
+  const stationsBySource = useMemo(() => {
+    const groups = new Map<string, Station[]>();
+    for (const station of stations) {
+      const group = groups.get(station.source_id) ?? [];
+      group.push(station);
+      groups.set(station.source_id, group);
+    }
+    return groups;
+  }, [stations]);
+  const selectedStations = useMemo(() => {
+    const selectedIds = selectedStationIds === null
+      ? null
+      : new Set(selectedStationIds);
+    return stations.filter((station) => selectedIds === null || selectedIds.has(station.id));
+  }, [selectedStationIds, stations]);
+  const selectedStationIdSet = useMemo(
+    () => new Set(selectedStations.map((station) => station.id)),
+    [selectedStations],
+  );
+  const currentSummariesByStation = useMemo(() => {
+    const map = new Map<string, CurrentSummary>();
+    for (const summary of currentSummaries) map.set(summary.location_id, summary);
+    return map;
+  }, [currentSummaries]);
   const dataByStation = useMemo(() => {
     const map = new Map<string, Map<string, AggregateResponse["rows"][number]>>();
     for (const row of data?.rows ?? []) {
@@ -174,6 +278,20 @@ export default function App() {
     result.sort(); return result;
   }, [forecastByHour, sortedHours]);
   const chartHours = useMemo(() => [...sortedHours, ...futureForecastHours], [sortedHours, futureForecastHours]);
+  const forecastSummary = useMemo(() => {
+    const hourly = forecast?.hourly ?? [];
+    if (hourly.length === 0) return null;
+    const next6 = hourly.slice(0, 6);
+    const next24 = hourly.slice(0, 24);
+    const rainProb = Math.max(0, ...next6.map((hour) => hour.precipitationProbability));
+    const temperatures = next24.map((hour) => hour.temperature);
+    return {
+      currentTemp: hourly[0]!.temperature,
+      rainProb,
+      maxTemp: Math.max(...temperatures),
+      minTemp: Math.min(...temperatures),
+    };
+  }, [forecast]);
   const forecastValueFor = (hour: string, variableKey: string): number | null => {
     const entry = forecastByHour.get(hour); if (!entry) return null;
     let value: number | null | undefined = null;
@@ -186,18 +304,28 @@ export default function App() {
     if (typeof value !== "number") return null;
     return Math.round(value * 100) / 100;
   };
-  const forecastSummary = useMemo(() => {
-    const hourly = forecast?.hourly ?? []; if (hourly.length === 0) return null;
-    const current = hourly[0]!, next6 = hourly.slice(0, 6), next24 = hourly.slice(0, 24);
-    const rainProb = Math.max(0, ...next6.map((h) => h.precipitationProbability));
-    const temps = next24.map((h) => h.temperature);
-    return { currentTemp: current.temperature, rainProb, maxTemp: Math.max(...temps), minTemp: Math.min(...temps) };
-  }, [forecast]);
   const visibleStationIds = useMemo(() => {
     const ids = new Set((data?.rows ?? []).map((r) => r.station_id));
-    if (selected) return ids.has(selected) ? [selected] : [];
     return Array.from(ids);
-  }, [data, selected]);
+  }, [data]);
+  const toggleCurrentStation = (stationId: string, checked: boolean) => {
+    const selectedIds = new Set(selectedStationIds ?? stations.map((station) => station.id));
+    if (checked) selectedIds.add(stationId);
+    else selectedIds.delete(stationId);
+    setSelectedStationIds(Array.from(selectedIds));
+  };
+  const toggleCurrentSource = (sourceId: string, checked: boolean) => {
+    const sourceStations = stationsBySource.get(sourceId) ?? [];
+    const selectedIds = new Set(selectedStationIds ?? stations.map((station) => station.id));
+    for (const station of sourceStations) {
+      if (checked) selectedIds.add(station.id);
+      else selectedIds.delete(station.id);
+    }
+    setSelectedStationIds(Array.from(selectedIds));
+  };
+  const selectAllCurrentStations = (checked: boolean) => {
+    setSelectedStationIds(checked ? null : []);
+  };
   const latestRowsByStation = useMemo(() => {
     const map = new Map<string, AggregateResponse["rows"][number]>();
     for (const [stationId, rowsByHour] of dataByStation) {
@@ -211,39 +339,110 @@ export default function App() {
   return (
     <div className="app">
       <header className="header"><h1>Meteo Data Dashboard</h1><div className="controls">
-        <label>Station<select value={selected} onChange={(e) => setSelected(e.target.value)}><option value="">All stations</option>{stations.map((s) => <option key={s.id} value={s.id}>{stationLabels.get(s.id) ?? s.name} ({s.id})</option>)}</select></label>
-        <label>Range<select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{HOUR_OPTIONS.map((h) => <option key={h} value={h}>{h} hours</option>)}</select></label>
+        <label>Range<select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{HOUR_OPTIONS.map((h) => <option key={h} value={h}>{hourOptionLabel(h)}</option>)}</select></label>
       </div></header>
       {error && <div className="error">{error}</div>}
       {!data && !error && <div className="loading">Loading…</div>}
-      {data && <main>
-        <section className="summary" aria-label="Latest readings"><div className="summary-grid primary-indicators">
-          {([
-            { key: "solar_radiation_avg", label: "☀ Solar radiation", unit: "W/m²" },
-            { key: "uv_index_avg", label: "☀ UV Index", unit: "" },
-            { key: "temperature_avg", label: "🌡 Temperature", unit: "°C" },
-          ] as const).map((indicator) => <section key={indicator.key} className={`summary-card primary-indicator ${indicator.key === "solar_radiation_avg" ? "solar-indicator" : ""}`}>
-            <h2 className="summary-label">{indicator.label}</h2>
-            <div className="indicator-readings">{visibleStationIds.map((sid) => {
-              const row = latestRowsByStation.get(sid);
-              const value = row?.[indicator.key] ?? null;
-              const category = indicator.key === "solar_radiation_avg" && value !== null ? solarCategory(value) : null;
-              const uv = indicator.key === "uv_index_avg" && value !== null ? uvInfo(value) : null;
-              return <div className="indicator-reading" key={sid}>
-                <span className="indicator-source">{stationLabels.get(sid) ?? stationNames.get(sid) ?? sid}</span>
-                {value === null ? <span className="indicator-value">–</span> : <>
-                  {indicator.key === "solar_radiation_avg" && <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.min(100, (value / 900) * 100)}%`, background: category?.color }} /></div>}
-                  <span className={`indicator-value ${indicator.key === "solar_radiation_avg" ? "solar-value" : ""}`} style={{ color: category?.color ?? uv?.color ?? (indicator.key === "temperature_avg" ? tempColor(value) : undefined) }}>
-                    {value.toFixed(indicator.key === "temperature_avg" ? 1 : indicator.key === "uv_index_avg" ? 1 : 0)}{indicator.unit ? ` ${indicator.unit}` : ""}
-                    {uv && <small> · {uv.label}</small>}
-                  </span>
-                </>}
-                {row && <span className="indicator-hour">{formatHour(row.hour)} · hourly average</span>}
-              </div>;
-            })}</div>
-          </section>)}
-          {forecast && forecast.hourly.length > 0 && forecastSummary && <div className="summary-card forecast-card"><span className="summary-label">📡 Forecast</span><div className="forecast-temp">{forecastSummary.currentTemp.toFixed(1)}°C</div><div className="forecast-detail">Rain next 6h: {forecastSummary.rainProb.toFixed(0)}%</div><div className="forecast-detail">Today: {forecastSummary.minTemp.toFixed(0)}° / {forecastSummary.maxTemp.toFixed(0)}°</div><div className="forecast-attribution">Forecast provided by Open-Meteo</div></div>}
-        </div></section>
+      {(data || currentSummaries.length > 0 || stations.length > 0) && <main>
+        <section className="summary current-section" aria-label="Latest readings">
+          <div className="section-heading">
+            <h2>Latest readings</h2>
+            <span className="section-updated">
+              {currentSummaries.length > 0 && <>Updated {formatObservedAt(currentSummaries.reduce((latest, summary) => summary.observed_at > latest ? summary.observed_at : latest, currentSummaries[0]!.observed_at))}</>}
+            </span>
+          </div>
+          <fieldset className="source-selector">
+            <legend>Data sources / stations</legend>
+            <div className="source-actions">
+              <button type="button" onClick={() => selectAllCurrentStations(true)}>Select all</button>
+              <button type="button" onClick={() => selectAllCurrentStations(false)}>Deselect all</button>
+            </div>
+            <div className="source-groups">
+              {Array.from(stationsBySource, ([sourceId, sourceStations]) => {
+                const allSourceSelected = sourceStations.length > 0 && sourceStations.every((station) => selectedStationIdSet.has(station.id));
+                const someSourceSelected = sourceStations.some((station) => selectedStationIdSet.has(station.id));
+                const partiallySelected = someSourceSelected && !allSourceSelected;
+                return <div className="source-group" key={sourceId}>
+                  <label className={`source-option source-parent${allSourceSelected ? " is-selected" : partiallySelected ? " is-partial" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={allSourceSelected}
+                      aria-checked={partiallySelected ? "mixed" : allSourceSelected}
+                      ref={(input) => { if (input) input.indeterminate = partiallySelected; }}
+                      onChange={(event) => toggleCurrentSource(sourceId, event.target.checked)}
+                    />
+                    <span>{sourceLabel(sourceId)}</span>
+                  </label>
+                  {sourceStations.map((station) => <label className={`source-option source-child${selectedStationIdSet.has(station.id) ? " is-selected" : ""}`} key={station.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedStationIdSet.has(station.id)}
+                      onChange={(event) => toggleCurrentStation(station.id, event.target.checked)}
+                    />
+                    <span>{station.name}</span>
+                  </label>)}
+                </div>;
+              })}
+            </div>
+          </fieldset>
+          <PeriodComparison
+            stations={stations}
+            selectedStations={selectedStations}
+            hours={hours}
+            rows={data && data.filters.hours === hours ? data.rows : []}
+            loading={aggregateLoading}
+            precipitationSamples={precipitationSamples}
+            precipitationLoading={precipitationLoading}
+            precipitationError={precipitationError}
+          />
+          {selectedStations.length > 0 && (
+            <div className="latest-observation-grid">
+              {selectedStations.map((station) => {
+                const summary = currentSummariesByStation.get(station.id);
+                return <article className="latest-station-card" key={station.id}>
+                  <header className="latest-station-header">
+                    <div>
+                      <h3>{station.name}</h3>
+                      <span className="latest-source">{sourceLabel(station.source_id)}</span>
+                    </div>
+                    {summary && <time className="current-observed" dateTime={summary.observed_at}>{formatObservedAt(summary.observed_at)}</time>}
+                  </header>
+                  <dl className="latest-metric-grid">
+                    {LATEST_METRICS.map((metric) => {
+                      const value = summary?.[metric.key as keyof CurrentSummary];
+                      const numericValue = typeof value === "number" ? value : null;
+                      const solar = metric.key === "solar_radiation" && numericValue !== null ? solarCategory(numericValue) : null;
+                      const uv = metric.key === "uv_index" && numericValue !== null ? uvInfo(numericValue) : null;
+                      const color = solar?.color ?? uv?.color ?? (metric.key === "temperature" && numericValue !== null ? tempColor(numericValue) : undefined);
+                      return <div className="latest-metric" key={metric.key}>
+                        <dt>{metric.label}</dt>
+                        <dd style={{ color }}>
+                          {numericValue === null ? "–" : <>
+                            {numericValue.toFixed(metric.decimals)}{metric.unit ? ` ${metric.unit}` : ""}
+                            {uv && <small> · {uv.label}</small>}
+                            {metric.key === "wind_direction" && <span className="latest-wind-arrow" style={{ transform: `rotate(${(numericValue % 360) + 180}deg)` }}>↑</span>}
+                          </>}
+                        </dd>
+                      </div>;
+                    })}
+                  </dl>
+                </article>;
+              })}
+            </div>
+          )}
+          {currentError && <p className="current-error">{currentError}</p>}
+          {currentLoading && <p className="empty-current">Loading…</p>}
+          {!currentLoading && !currentError && currentSummaries.length === 0 && <p className="empty-current">No current readings available</p>}
+        </section>
+        <section className="graphic-section" aria-label="Graphic Data">
+          <h2 className="major-section-title">Graphic Data</h2>
+        {forecastSummary && <section className="chart-card forecast-card">
+          <span className="summary-label">📡 Forecast</span>
+          <div className="forecast-temp">{forecastSummary.currentTemp.toFixed(1)}°C</div>
+          <div className="forecast-detail">Rain next 6h: {forecastSummary.rainProb.toFixed(0)}%</div>
+          <div className="forecast-detail">Today: {forecastSummary.minTemp.toFixed(0)}° / {forecastSummary.maxTemp.toFixed(0)}°</div>
+          <div className="forecast-attribution">Forecast provided by Open-Meteo</div>
+        </section>}
         {CHART_VARIABLES.map((v) => {
           const forecastLine = forecastLineFor(v.key);
           const hoursForChart = forecastLine ? chartHours : sortedHours;
@@ -288,7 +487,11 @@ export default function App() {
             </LineChart></ResponsiveContainer></div>
           </section>;
         })}
-        <section className="chart-card secondary-data"><h2>Latest hourly averages</h2><div className="table-wrap"><table><thead><tr><th>Station</th><th>Hour</th>{SUMMARY_VARIABLES.map((v) => <th key={v.key}>{v.label}</th>)}</tr></thead><tbody>{data?.rows.slice().sort((a, b) => b.hour.localeCompare(a.hour)).slice(0, visibleStationIds.length * 2).map((row, i) => <tr key={i}><td>{stationLabels.get(row.station_id) ?? stationNames.get(row.station_id) ?? row.station_id}</td><td>{formatHour(row.hour)}</td>{SUMMARY_VARIABLES.map((v) => <td key={v.key}>{row[v.key as keyof AggregateResponse["rows"][number]] !== null ? Number(row[v.key as keyof AggregateResponse["rows"][number]]).toFixed(1) : "–"}</td>)}</tr>)}</tbody></table></div></section>
+        </section>
+        <section className="table-section" aria-label="Table with data">
+          <h2 className="major-section-title">Table with data</h2>
+          <section className="chart-card secondary-data"><h2>Latest hourly averages</h2><div className="table-wrap"><table><thead><tr><th>Station</th><th>Hour</th>{SUMMARY_VARIABLES.map((v) => <th key={v.key}>{v.label}</th>)}</tr></thead><tbody>{data?.rows.slice().sort((a, b) => b.hour.localeCompare(a.hour)).slice(0, visibleStationIds.length * 2).map((row, i) => <tr key={i}><td>{stationLabels.get(row.station_id) ?? stationNames.get(row.station_id) ?? row.station_id}</td><td>{formatHour(row.hour)}</td>{SUMMARY_VARIABLES.map((v) => <td key={v.key}>{row[v.key as keyof AggregateResponse["rows"][number]] !== null ? Number(row[v.key as keyof AggregateResponse["rows"][number]]).toFixed(1) : "–"}</td>)}</tr>)}</tbody></table></div></section>
+        </section>
       </main>}
     </div>
   );

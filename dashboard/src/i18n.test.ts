@@ -76,6 +76,14 @@ describe("translateValue", () => {
     expect(translateValue("5 stations", "es")).toBe("5 estaciones");
     expect(translateValue("Next 24 hours", "es")).toBe("Next 24 horas");
   });
+
+  it("translates the new peer-comparison terminology", () => {
+    expect(translateValue("Period comparison", "pt-BR")).toBe("Comparação do período");
+    expect(translateValue("warmer than peer average", "pt-BR")).toBe("mais quente que a média das demais estações");
+    expect(translateValue("below peer average", "pt-BR")).toBe("abaixo da média das demais estações");
+    expect(translateValue("8 pp", "pt-BR")).toBe("8 pontos percentuais");
+    expect(translateValue("Select at least two stations to compare them against the average of the other selected stations.", "es")).toContain("al menos dos estaciones");
+  });
 });
 
 describe("locale switching against the real DOM", () => {

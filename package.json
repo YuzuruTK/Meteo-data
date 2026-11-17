@@ -6,6 +6,8 @@
   "description": "Config-driven meteorological data collector for Cloudflare Workers + D1",
   "scripts": {
     "dev": "wrangler dev",
+    "db:example": "node scripts/sync-example-db.mjs",
+    "dev:example": "npm run db:example && wrangler dev --persist-to .wrangler/production-example/state",
     "deploy": "npm run build:dashboard && wrangler deploy",
     "build": "wrangler deploy --dry-run --outdir=dist",
     "typecheck": "tsc --noEmit",
